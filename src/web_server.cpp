@@ -507,13 +507,17 @@ void proxyWorkerTask(void *pvParameters) {
           }
           http.end();
         }
-        if (mac.length() != 12 && mac.length() != 17) continue;  // ESP01 /mac formatina uymuyor
+        mac = normMac(mac);
+        if (!mac.length()) continue;  // ESP01 /mac formatina uymuyor
 
+        // Kayitli cihaz: ayni IP VEYA ayni MAC (IP'si degismis olabilir - durum
+        // gorevi onu MAC'iyle bulup kaydini kendisi guncelliyor, "yeni" degil)
         bool known = false;
         for (JsonObject d : doc.as<JsonArray>()) {
-          if (String((const char*)(d["ip"] | "")) == ip.toString()) { known = true; break; }
+          if (String((const char*)(d["ip"] | "")) == ip.toString() ||
+              (d["mac"] | String("")) == mac) { known = true; break; }
         }
-        if (known) continue;  // zaten devices.json'da kayitli
+        if (known) continue;
 
         JsonObject o = arr.createNestedObject();
         o["ip"] = ip.toString();

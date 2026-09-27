@@ -1360,7 +1360,9 @@ function readDeviceRows() {
     const arr = [];
     for (let j = 0; j < DEVICES.length; j++) {
         const n = document.getElementById("n"+j), ip = document.getElementById("i"+j);
-        arr.push({ name: n ? n.value.trim() : DEVICES[j].name, ip: ip ? ip.value.trim() : DEVICES[j].ip });
+        const row = { name: n ? n.value.trim() : DEVICES[j].name, ip: ip ? ip.value.trim() : DEVICES[j].ip };
+        if (DEVICES[j].mac) row.mac = DEVICES[j].mac;  // HUB'in ogrendigi MAC - IP takibi icin korunur
+        arr.push(row);
     }
     return arr;
 }
@@ -1453,7 +1455,7 @@ function confirmScanDevice(idx) {
 
     // Mevcut tablo satırlarındaki düzenlemeleri kaybetmemek için DOM'dan oku
     const arr = readDeviceRows();
-    arr.push({ name, ip: d.ip });
+    arr.push({ name, ip: d.ip, mac: d.mac });
     if (!rowsValid(arr)) {
         toast("⚠ Listede eksik IP'li satır var, önce onu düzeltin", true);
         return;
