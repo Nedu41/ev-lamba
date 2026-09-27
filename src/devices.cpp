@@ -69,6 +69,10 @@ bool sendControlSignal(const String& ip, int relay, const String& action) {
   if (ip == "" || relay == 0 || action == "") return false;
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
+  // BUGFIX: connect timeout verilmezse HTTPClient varsayilani 5sn - cevrimdisi
+  // cihaza komut 5sn bekliyor, tarayici 3sn'de "zaman asimi" diyordu; otomasyon
+  // ve komut kuyrugu da her cevrimdisi cihaz icin 5sn kilitleniyordu.
+  http.setConnectTimeout(800);
   String url = "http://" + ip + "/control?id=" + String(relay) + "&action=" + action;
   http.begin(url);
   int code = http.GET();

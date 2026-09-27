@@ -1001,7 +1001,7 @@ function toggle(i, r) {
 
     sendControl(dev.ip, parseInt(r), action)
         .then(res => {
-            if (!res.ok) throw new Error("cihaz reddetti");
+            if (!res.ok) throw new Error("cihaz yanıt vermiyor, çevrimdışı olabilir");
             btn.textContent = action === "on" ? "✅ AÇIK" : "⭕ KAPALI";
             btn.className = action === "on" ? "btn on" : "btn off";
             // setForceRefresh() sunucu tarafinda zaten tetiklendi - taze

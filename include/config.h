@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Web arayuzu basliginda ve TFT ust seridinde gosterilir - tek kaynak burasi
-#define FW_VERSION "6.1.0"
+#define FW_VERSION "6.1.1"
 
 // ---- Donanim ----
 #define BACKLIGHT_PIN 21
