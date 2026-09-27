@@ -1,55 +1,62 @@
 # ev-lamba — Merkezi HUB
 
 ESP32 (TFT ekranlı) üzerinde çalışan, evdeki ESP01 tabanlı röle/lamba düğümlerini
-tek bir web arayüzünden yöneten merkezi kontrol ünitesi ("Merkezi HUB").
+tek bir web arayüzünden yöneten merkezi kontrol ünitesi ("Merkezi HUB"). Sürüm: `FW_VERSION` (`include/config.h`).
 
 ## Özellikler
 
 - WiFiManager ile kurulum (AP: `MerkeziHUB_SETUP`), kayıtlı ağa otomatik bağlanma.
-- Web arayüzü (`include/relay_webpage_multi.h` içine gömülü, PROGMEM) üzerinden
-  cihaz listesi, röle kontrolü, zaman/gün doğumu-batımı zamanlayıcısı.
-- Cihazlara (`ip/status`, `ip/control`, `ip/mac`) HTTP proxy ile erişim — CORS/karışıklık
-  olmadan tarayıcıdan tek adresten tüm cihazlar yönetilir.
-- Open-Meteo'dan hava durumu (bulut, rüzgar, nem, gün doğumu/batımı) çekip
-  hava durumuna göre otomasyon + rüzgar eşiği aşılırsa Telegram uyarısı.
-- MQTT (HiveMQ public broker) ile röle durumu paylaşımı.
-- TFT ekranda anlık şehir/sıcaklık/nem/rüzgar gösterimi.
+- Web arayüzü (`include/relay_webpage_multi.h`, PROGMEM): röle kontrolü, saatli zamanlayıcı,
+  gündoğumu/günbatımı aksiyonları, hava otomasyonu. Tüm ayarlar değiştiği anda otomatik kaydedilir.
+- Tarayıcı ↔ HUB arası WebSocket (`/ws`): röle komutları ve durum güncellemeleri anlık.
+  HUB ↔ ESP01 arası HTTP (`/status`, `/control`, `/mac`, `/save`).
+- Cihaz keşfi: mDNS (`esp01-XXXXXX.local`) ile ağdaki ESP01'ler taranır, isim verilerek eklenir.
+- OTA: HUB (`merkezihub.local`) ve ESP01'ler kablosuz güncellenir.
+- Hava durumu: Open-Meteo, model `ecmwf_ifs025`. Bulut/karanlık eşiğine göre röle otomasyonu,
+  rüzgar eşiği aşılırsa Telegram uyarısı.
+- TFT: hava durumuna göre canlı arka plan (güneş, ay/yıldız, bulut, sis, yağmur, kar, şimşek),
+  alt kısımda Anadolu Ajansı dünya haberleri kayan yazısı.
+- MQTT (HiveMQ public broker).
 
-## Donanım / Arduino IDE karşılığı
+## Donanım
 
-Bu proje daha önce Arduino IDE'de tek `.ino` dosyası olarak yürütülüyordu:
+- Board: **ESP32 Dev Module**, PSRAM enable, partition `huge_app.csv` (`platformio.ini`).
+- TFT: ILI9341 (240x320), pinler `platformio.ini` `build_flags`'ta:
+  MISO 12, MOSI 13, SCLK 14, CS 15, DC 2, BL 21.
+- GPIO2 hem kart üstü LED hem `TFT_DC` — LED olarak kullanılmaz.
 
-- ESP32 core: 2.0.18 (arduino-esp32 v3.1.0)
-- Board: **ESP32 Dev Module**
-- PSRAM: **Enable**
-- Partition Scheme: **Huge APP**
-- TFT: ILI9341 (240x320), pinler `platformio.ini` içindeki `build_flags`'ta birebir
-  `D:\Arduino\libraries\TFT_eSPI\User_Setup.h` ile aynı (MISO 12, MOSI 13, SCLK 14, CS 15, DC 2, BL 21).
+## Kod yapısı
 
-PlatformIO'ya taşınırken bu ayarlar `platformio.ini` içine build_flags olarak işlendi
-ve **`pio run` ile derlemesi doğrulandı** (RAM ~%15, Flash ~%40).
-
-⚠️ **Bilinen pin çakışması:** `ONBOARD_LED_PIN` (2) ile TFT'nin `TFT_DC` pini (2) aynı.
-`flashLED()` her HTTP isteğinde bu pini toggluyor — bu muhtemelen ekranda küçük
-titreme/flicker'a sebep oluyordur. Dokunulmadı (davranışı değiştirmemek için), ama
-ileride ayrı bir GPIO'ya taşınması önerilir.
+| Dosya | İçerik |
+|---|---|
+| `src/main.cpp` | `setup()` / `loop()` |
+| `include/config.h` | Sürüm, pinler, zaman aralıkları, dosya adları |
+| `src/app_state.cpp` | Görevler arası paylaşılan durum (JSON dokümanları, mutex'ler) |
+| `src/storage.cpp` | LittleFS: cihaz listesi, zamanlayıcı, hava ayarları |
+| `src/devices.cpp` | ESP01 HTTP iletişimi + durum görevi |
+| `src/weather.cpp` | Open-Meteo, geocode, NTP |
+| `src/automation.cpp` | Bulut otomasyonu, gündoğumu/batımı + saatli zamanlayıcı, rüzgar uyarısı |
+| `src/display.cpp` | TFT: canlı hava sahnesi, paneller, haber kayan yazısı |
+| `src/web_server.cpp` | AsyncWebServer rotaları, WebSocket, ESP01 proxy worker, mDNS tarama |
+| `src/mqtt_link.cpp`, `src/telegram.cpp` | MQTT, Telegram |
 
 ## Kurulum
 
-1. `include/secrets.h.example` dosyasını `include/secrets.h` olarak kopyala, kendi
-   Telegram bot token / chat ID bilgilerini gir. `secrets.h` `.gitignore`'da, repoya girmez.
-2. VS Code + PlatformIO eklentisiyle klasörü aç, `pio run` (derle) / `pio run -t upload` (yükle).
-3. İlk açılışta ESP `MerkeziHUB_SETUP` adında bir AP açar; oradan gerçek WiFi ağını seç.
+1. `include/secrets.h.example` → `include/secrets.h`, Telegram bot token / chat ID gir
+   (`secrets.h` `.gitignore`'da).
+2. Derle: `pio run`. İlk yükleme USB ile: `pio run -t upload`.
+3. İlk açılışta ESP `MerkeziHUB_SETUP` AP'si açar; oradan WiFi ağını seç.
 
-## Geçmiş / notlar
+### Kablosuz güncelleme (OTA)
 
-- Bu proje `D:\Arduino\ESP\esp32Wroom_Sunucu_v5_6_8` klasöründen (dosya içi sürüm etiketi:
-  v5.7.0) buraya taşındı — `D:\Arduino\ESP` altında v1.0'dan v5.6.8'e onlarca eski versiyon
-  klasörü hâlâ duruyor, arşiv olarak orada bırakıldı.
-- Taşınmadan önce kod **derlenmiyordu**: `handleSaveWeatherConfig()` içinde ArduinoJson v7
-  ile uyumsuz bir karşılaştırma vardı (ham `MemberProxy`'yi `!=` ile kopyalamaya çalışıyordu).
-  Düzeltildi, davranış değişmedi (bkz. `src/main.cpp` içindeki ilgili yorum satırı).
-- `docs/legacy/` altındaki `index*.html` dosyaları artık kullanılmıyor — web arayüzü
-  `include/relay_webpage_multi.h` içine taşınmış durumda, bunlar sadece referans için duruyor.
-- Eski GitHub reposu `Nedu41/merkezi-hub.io` sadece bu legacy HTML dosyalarını içeriyordu,
-  firmware koduna hiç sahip değildi. Bu repo (`ev-lamba`) firmware + web arayüzünü birlikte tutar.
+- HUB: `pio run -t upload --upload-port merkezihub.local`
+- ESP01 (proje: `D:\Arduino\ESP\ESP01_AI_Rolekontrol_AI_Mac_ID_v2_0_3`, PlatformIO, `src/`):
+  `pio run -t upload --upload-port esp01-XXXXXX.local` (XXXXXX = MAC'in son 6 hanesi)
+- USB ile flaşlamadan sonraki **ilk** OTA "Invalid bootstrapping state" hatası verirse:
+  cihazın gücünü bir kez kesip ver (USB flaş sonrası GPIO0 strap durumu).
+
+## Notlar
+
+- Geri dönüş: `pre-async-migration` git etiketi, WebSocket/modül geçişinden önceki tek dosyalı sürüm.
+- `docs/legacy/` altındaki `index*.html` dosyaları kullanılmıyor, referans için duruyor.
+- Eski sürüm klasörleri (`D:\Arduino\ESP\esp32Wroom_Sunucu_v*`) arşiv olarak orada.

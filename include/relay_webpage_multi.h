@@ -5,8 +5,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>Merkezi Hub v5.5.3 (YEREL)</title>
-<meta http-equiv="Cache-Control" content="max-age=31536000, must-revalidate"> 
+<title>Merkezi Hub</title>
 
 <style>
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
@@ -18,6 +17,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #eee; margin: 0; padding-bottom: 20px; }
 .header { background: #222; color: #03dac6; padding: 12px; text-align: center; font-size: 1.1em; font-weight: bold; border-bottom: 2px solid #333; display: flex; justify-content: space-between; align-items: center; }
 .header span { font-size: 0.8em; color: #888; }
+.fwver { font-size: 0.6em; color: #9a9a9a; font-weight: normal; margin-left: 4px; }
 .nav { background: #1a1a1a; padding: 8px; display: flex; justify-content: center; gap: 15px; border-bottom: 1px solid #333; }
 .nav a { color: #888; text-decoration: none; font-size: 0.9em; padding: 5px 10px; border-radius: 4px; transition: 0.3s; }
 .nav a.active { background: #3700b3; color: #fff; }
@@ -54,18 +54,14 @@ input[type="time"], input[type="text"], input[type="number"], select {
 table { width: 100%; border-collapse: collapse; }
 td { padding: 8px; border-bottom: 1px solid #333; }
 
-.github-info { 
-    background: #1a1a1a; 
-    padding: 5px 10px; 
-    border-radius: 4px; 
-    font-size: 0.8em; 
-    color: #888; 
-    text-align: center;
-    margin-top: 10px;
-    border: 1px solid #333;
-}
-.github-info.active { border-color: #4CAF50; color: #4CAF50; }
-.github-info.inactive { border-color: #cf6679; color: #cf6679; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1f1f1f; color: #03dac6; border: 1px solid #03dac6; border-radius: 20px; padding: 8px 18px; font-size: 0.9em; opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 1000; }
+.toast.show { opacity: 1; }
+.toast.err { color: #cf6679; border-color: #cf6679; }
+input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important; }
+.scan-box { background: #1a1a1a; border: 1px solid #2196F3; border-radius: 6px; padding: 10px; margin: 10px 0; font-size: 0.85em; }
+.scan-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid #333; }
+.scan-row span { flex: 1 1 200px; color: #03dac6; }
+.scan-row input { flex: 1 1 120px; background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px; }
 
 /* WiFi bilgi kutusu */
 .wifi-info {
@@ -594,7 +590,7 @@ td { padding: 8px; border-bottom: 1px solid #333; }
 <body>
 
 <div class="header">
-    <div>MERKEZİ HUB v5.5.3</div>
+    <div>MERKEZİ HUB <small id="fwver" class="fwver"></small></div>
     <span id="clock">00:00</span>
 </div>
 
@@ -606,12 +602,55 @@ td { padding: 8px; border-bottom: 1px solid #333; }
 
 <div id="content">Yükleniyor...</div>
 
-<div id="githubStatus" class="github-info inactive">GitHub: YEREL MOD</div>
-
 <script>
 let DEVICES = [], STATUS = {}, CURRENT_WEATHER = {}, WEATHER_CONFIG = {};
 let lastToggleTime = 0;
 const daysName = ["Pt","Sa","Ça","Pe","Cu","Ct","Pz"];
+
+// ===== WebSocket - buton gecikmesini onlemek icin HTTP polling/proxy yerine =====
+let ws = null;
+let wsReqCounter = 1;
+const pendingControlRequests = {};
+
+function connectWS() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onclose = () => setTimeout(connectWS, 2000);
+    ws.onerror = () => { try { ws.close(); } catch(e) {} };
+    ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch(e) { return; }
+        if (msg.type === "status") {
+            applyStatusPayload(msg);
+            applyDomUpdates();
+        } else if (msg.type === "control_result") {
+            const p = pendingControlRequests[msg.reqId];
+            if (p) {
+                clearTimeout(p.timeoutHandle);
+                p.resolve(msg);
+                delete pendingControlRequests[msg.reqId];
+            }
+        } else if (msg.type === "scan_result") {
+            renderScanResults(msg.devices || []);
+        }
+    };
+}
+
+function sendControl(ip, relay, action, timeoutMs = 3000) {
+    return new Promise((resolve, reject) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            reject(new Error("WS bağlı değil"));
+            return;
+        }
+        const reqId = wsReqCounter++;
+        const t = setTimeout(() => {
+            delete pendingControlRequests[reqId];
+            reject(new Error("zaman aşımı"));
+        }, timeoutMs);
+        pendingControlRequests[reqId] = { resolve, reject, timeoutHandle: t };
+        ws.send(JSON.stringify({ type: "control", reqId, ip, relay, action }));
+    });
+}
 
 // Saat Göstergesi
 setInterval(() => {
@@ -630,36 +669,37 @@ function fetchDevices(){
     return fetch("/get_devices").then(r=>r.json()).then(d=>DEVICES=d); 
 }
 
-function fetchStatus(){ 
-    return fetch("/fetch_status").then(r=>r.json()).then(d=>{ 
-        STATUS = d.devices || {}; 
-        CURRENT_WEATHER = d.weather || {}; 
-        WEATHER_CONFIG = d.weather_config || {}; 
-        
-        // GitHub durumunu güncelle
-        const githubStatus = document.getElementById('githubStatus');
-        if (githubStatus && d.github_mode) {
-            githubStatus.textContent = `GitHub: ${d.github_mode.toUpperCase()} MOD`;
-            githubStatus.className = d.github_mode === 'github' ? 'github-info active' : 'github-info inactive';
-            if (d.github_size) {
-                githubStatus.textContent += ` (${Math.round(d.github_size/1024)}KB)`;
-            }
-        }
-        
-        return d; 
-    }); 
+function applyStatusPayload(d) {
+    STATUS = d.devices || {};
+    CURRENT_WEATHER = d.weather || {};
+    WEATHER_CONFIG = d.weather_config || {};
+    if (d.fw) document.getElementById("fwver").textContent = "v" + d.fw;
+    return d;
 }
 
-// GitHub Kontrolü
-function githubControl(action) {
-    fetch(`/github_control?action=${action}`)
-        .then(r => r.text())
-        .then(response => {
-            alert(response);
-            if (action === 'update' || action === 'enable' || action === 'disable') {
-                setTimeout(() => location.reload(), 1000);
-            }
-        });
+function fetchStatus(){
+    return fetch("/fetch_status").then(r=>r.json()).then(applyStatusPayload);
+}
+
+// Otomatik kayit bildirimi (kaydet butonlari kaldirildi)
+function toast(msg, isError) {
+    let el = document.getElementById("toast");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = "toast show" + (isError ? " err" : "");
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.className = "toast"; }, 1800);
+}
+
+// Ayni alanda art arda degisiklikleri (gun kutucuklari vb.) tek kayda indirir
+const _saveTimers = {};
+function debounceSave(key, fn, ms = 700) {
+    clearTimeout(_saveTimers[key]);
+    _saveTimers[key] = setTimeout(fn, ms);
 }
 
 // Geri bildirim
@@ -774,13 +814,13 @@ function renderControl() {
                 </div>
                 
                 <div style="display:flex;gap:5px;align-items:center">
-                    <input type="time" id="t1_${i}" value="08:00"> 
-                    <span>-</span> 
-                    <input type="time" id="t2_${i}" value="18:00">
+                    <input type="time" id="t1_${i}" value="08:00" onchange="autoSaveProg(${i})">
+                    <span>-</span>
+                    <input type="time" id="t2_${i}" value="18:00" onchange="autoSaveProg(${i})">
                 </div>
 
                 <div class="days">
-                    ${daysName.map((d,j)=>`<input type="checkbox" id="d${i}_${j}"><label for="d${i}_${j}">${d}</label>`).join("")}
+                    ${daysName.map((d,j)=>`<input type="checkbox" id="d${i}_${j}" onchange="autoSaveProg(${i})"><label for="d${i}_${j}">${d}</label>`).join("")}
                 </div>
                 
                 <div style="margin:8px 0; padding:6px; background:#1a1a1a; border-radius:6px; font-size:0.75em">
@@ -789,7 +829,7 @@ function renderControl() {
 
   <div style="margin-bottom:6px">
     ☀️ Gündoğumu:
-    <select id="sunrise_act_${i}">
+    <select id="sunrise_act_${i}" onchange="autoSaveProg(${i})">
       <option value="0">Pasif</option>
       <option value="ON">AÇ</option>
       <option value="OFF">KAPAT</option>
@@ -798,7 +838,7 @@ function renderControl() {
 
   <div>
     🌙 Günbatımı:
-    <select id="sunset_act_${i}">
+    <select id="sunset_act_${i}" onchange="autoSaveProg(${i})">
       <option value="0">Pasif</option>
       <option value="ON">AÇ</option>
       <option value="OFF">KAPAT</option>
@@ -810,7 +850,6 @@ function renderControl() {
                  </div>
 
                 <div class="action-btns">
-                    <button class="btn on" id="saveProgBtn_${i}" onclick="saveProg(${i})">KAYDET</button>
                     <button class="btn off" onclick="clearProg(${i})">SİL</button>
                 </div>
             </div>
@@ -818,24 +857,17 @@ function renderControl() {
     });
     
     html += `</div>`;
-    
-    // GitHub kontrol butonları
-    html += `
-    <div style="text-align:center;margin-top:20px;">
-        <button class="btn" onclick="githubControl('update')" style="background:#333;margin:5px">🔄 GitHub Güncelle</button>
-        <button class="btn" onclick="githubControl('enable')" style="background:#4CAF50;margin:5px">✅ GitHub Aktif</button>
-        <button class="btn" onclick="githubControl('disable')" style="background:#cf6679;margin:5px">❌ GitHub Pasif</button>
-        <button class="btn" onclick="githubControl('status')" style="background:#2196F3;margin:5px">ℹ️ GitHub Durumu</button>
-    </div>`;
-    
+
     document.getElementById("content").innerHTML = html;
 }
 
 // Durum Güncelleme
 function update() {
     if(location.pathname !== "/") return;
-    
-    fetchStatus().then(() => {
+    fetchStatus().then(applyDomUpdates);
+}
+
+function applyDomUpdates() {
         DEVICES.forEach((dev, i) => {
             const s = STATUS[dev.name] || {r1_state:"OFFLINE", r2_state:"OFFLINE"};
             
@@ -918,7 +950,6 @@ if(prog && sunInfo) prog.innerText += " " + sunInfo;
 
             }
         });
-    });
 }
 
 // Zamanlayıcı Bölümü Aç/Kapa
@@ -952,42 +983,44 @@ function getMask(i) {
     return m; 
 }
 
-// Röle Toggle
+// Röle Toggle - eskiden 2 ayrı fetch() (manual_control + proxy) atıyordu,
+// senkron WebServer altında bu araya giren durum sorgulamalarıyla
+// çakışıp "buton gecikmesi" hissi yaratıyordu. Artık tek WS round-trip.
 function toggle(i, r) {
-    const dev = DEVICES[i]; 
+    const dev = DEVICES[i];
     const btn = document.getElementById("b"+r+"_"+i);
     const originalText = btn.textContent;
     const originalClass = btn.className;
-    
+
     // Optimistik UI
     btn.textContent = "⏳";
     btn.disabled = true;
-    
-    // Manuel kontrol sinyali
-    fetch("/manual_control");
-    
+
     // Röle durumunu belirle
     const action = originalText.includes("AÇIK") ? "off" : "on";
-    
-    fetch(`/proxy?ip=${encodeURIComponent(dev.ip)}&url=${encodeURIComponent("/control?id="+r+"&action="+action)}`)
-        .then(response => {
-            if (response.ok) {
-                btn.textContent = action === "on" ? "✅ AÇIK" : "⭕ KAPALI";
-                btn.className = action === "on" ? "btn on" : "btn off";
-                setTimeout(update, 500);
-            } else {
-                throw new Error("HTTP hatası");
-            }
+
+    sendControl(dev.ip, parseInt(r), action)
+        .then(res => {
+            if (!res.ok) throw new Error("cihaz reddetti");
+            btn.textContent = action === "on" ? "✅ AÇIK" : "⭕ KAPALI";
+            btn.className = action === "on" ? "btn on" : "btn off";
+            // setForceRefresh() sunucu tarafinda zaten tetiklendi - taze
+            // "status" push'u bu round-trip'le birlikte gelecek, ekstra
+            // setTimeout(update,...) gerekmiyor.
         })
         .catch(error => {
             btn.textContent = originalText;
             btn.className = originalClass;
-            btn.disabled = false;
-            alert(`Hata: ${dev.name} ile iletişim kurulamadı.`);
-        });
+            alert(`Hata: ${dev.name} ile iletişim kurulamadı. (${error.message})`);
+        })
+        .finally(() => { btn.disabled = false; });
 }
 
-// Zamanlayıcı Kaydet
+// Zamanlayıcı - alan degisince otomatik kaydedilir (KAYDET butonu yok)
+function autoSaveProg(i) {
+    debounceSave("prog_" + i, () => saveProg(i));
+}
+
 function saveProg(i) {
     const dev = DEVICES[i];
     const r = getRelay(i);
@@ -1000,11 +1033,9 @@ function saveProg(i) {
 const sunriseAct = document.getElementById(`sunrise_act_${i}`).value;
 const sunsetAct  = document.getElementById(`sunset_act_${i}`).value;
 
-
-    if(!mask) {
-        alert("Lütfen en az bir gün seçin!");
-        return;
-    }
+    // Gun secilmemisse saatli zamanlayici pasif (active=0) kaydedilir -
+    // gundogumu/batimi ayari gunlerden bagimsiz calismaya devam eder.
+    const active = mask ? 1 : 0;
 
     // LocalStorage
     localStorage.setItem(`p_${dev.name}_r${r}_s`, start);
@@ -1019,7 +1050,7 @@ const url =
  `/save?relay_id=${r}` +
  `&start_h=${sh}&start_m=${sm}` +
  `&end_h=${eh}&end_m=${em}` +
- `&days=${mask}&active=1` +
+ `&days=${mask}&active=${active}` +
  `&sunrise_act=${sunriseAct}` +
  `&sunset_act=${sunsetAct}`;
 
@@ -1027,13 +1058,12 @@ const url =
     fetch(`/proxy?ip=${encodeURIComponent(dev.ip)}&url=${encodeURIComponent(url)}`)
         .then(response => {
             if(response.ok) {
-                feedbackSuccess('saveProgBtn_'+i);
-                setTimeout(update, 1000);
+                toast(mask ? "✓ Zamanlayıcı kaydedildi" : "✓ Kaydedildi (gün seçilmedi, saatli program pasif)");
             } else {
-                alert("Zamanlayıcı kaydedilemedi!");
+                toast("✗ Zamanlayıcı kaydedilemedi", true);
             }
         })
-        .catch(() => alert("İletişim hatası!"));
+        .catch(() => toast("✗ İletişim hatası", true));
 }
 
 
@@ -1090,11 +1120,13 @@ function renderSettings() {
                 <h3>📱 Cihaz Yönetimi</h3>
                 <div class="devices-header-buttons">
                     <button class="btn warning" onclick="restartHub()" title="Hub'ı yeniden başlat">🔄 Yeniden Başlat</button>
+                    <button class="btn" onclick="scanDevices()" title="Ağdaki ESP01 cihazlarını mDNS ile tara" style="background:#2196F3">🔍 Cihaz Tara</button>
                     <button class="btn add-device-btn" onclick="add()" title="Yeni cihaz ekle">➕ Yeni Cihaz</button>
-                    <button class="btn save-devices-btn" onclick="saveDevices()" title="Tüm değişiklikleri kaydet">💾 Kaydet</button>
                 </div>
             </div>
-            
+
+            <div id="scanResults"></div>
+
             <div class="devices-table-wrapper">
                 <table id="devicesTable">
                     <thead>
@@ -1126,14 +1158,14 @@ function renderSettings() {
             html += `
                     <tr>
                         <td class="cell-name">
-                            <input type="text" id="n${i}" value="${d.name}" 
-                                   class="compact-input" 
+                            <input type="text" id="n${i}" value="${d.name}"
+                                   class="compact-input" onchange="saveDevices()"
                                    placeholder="Cihaz Adı"
                                    title="Cihaz adını düzenle">
                         </td>
                         <td class="cell-ip">
-                            <input type="text" id="i${i}" value="${d.ip}" 
-                                   class="compact-input" 
+                            <input type="text" id="i${i}" value="${d.ip}"
+                                   class="compact-input" onchange="saveDevices()"
                                    placeholder="192.168.1.x"
                                    title="IP adresini düzenle">
                         </td>
@@ -1321,39 +1353,115 @@ function deviceWifiClear(deviceIndex) {
         });
 }
 
-function add() { 
-    DEVICES.push({name: `Cihaz_${DEVICES.length+1}`, ip: "192.168.1."}); 
-    renderSettings(); 
-}
+// Cihaz listesi - isim/IP alanindan cikinca otomatik kaydedilir (Kaydet butonu yok)
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 
-function del(idx) { 
-    DEVICES.splice(idx, 1); 
-    renderSettings(); 
-}
-
-function saveDevices() {
+function readDeviceRows() {
     const arr = [];
-    for(let j = 0; j < DEVICES.length; j++) {
-        arr.push({
-            name: document.getElementById("n"+j).value.trim(),
-            ip: document.getElementById("i"+j).value.trim()
-        });
+    for (let j = 0; j < DEVICES.length; j++) {
+        const n = document.getElementById("n"+j), ip = document.getElementById("i"+j);
+        arr.push({ name: n ? n.value.trim() : DEVICES[j].name, ip: ip ? ip.value.trim() : DEVICES[j].ip });
     }
-    
-    fetch("/save_devices", {
+    return arr;
+}
+
+function rowsValid(arr) {
+    return arr.every(d => d.name.length > 0 && IPV4_RE.test(d.ip));
+}
+
+function postDevices(arr, okMsg) {
+    return fetch("/save_devices", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(arr)
     }).then(r => {
-        if (r.ok) {
-            feedbackSuccess('saveDevBtn');
-            // Sayfayı yeniden yükle
-            setTimeout(() => renderSettings(), 500);
-        }
-    });
+        if (!r.ok) throw new Error();
+        DEVICES = arr;
+        toast(okMsg);
+    }).catch(() => toast("✗ Cihazlar kaydedilemedi", true));
 }
 
-function restartHub() { 
+function add() {
+    DEVICES = readDeviceRows();
+    // Yarim IP ile kaydedilmez - IP tamamlaninca otomatik kaydolur
+    DEVICES.push({name: `Cihaz_${DEVICES.length+1}`, ip: "192.168.1."});
+    renderSettings();
+}
+
+function del(idx) {
+    const arr = readDeviceRows();
+    if (!confirm(`"${arr[idx].name}" silinsin mi?`)) return;
+    arr.splice(idx, 1);
+    if (!rowsValid(arr)) {
+        DEVICES = arr;
+        renderSettings();
+        toast("⚠ Diğer satırda eksik IP var, liste o düzelince kaydedilecek", true);
+        return;
+    }
+    postDevices(arr, "✓ Cihaz silindi").then(() => renderSettings());
+}
+
+function saveDevices() {
+    const arr = readDeviceRows();
+    arr.forEach((d, j) => {
+        const nEl = document.getElementById("n"+j), ipEl = document.getElementById("i"+j);
+        if (nEl) nEl.classList.toggle("invalid", d.name.length === 0);
+        if (ipEl) ipEl.classList.toggle("invalid", !IPV4_RE.test(d.ip));
+    });
+    if (!rowsValid(arr)) {
+        toast("⚠ Eksik/geçersiz alan var, kaydedilmedi", true);
+        return;
+    }
+    postDevices(arr, "✓ Cihazlar kaydedildi");
+}
+
+// ===== mDNS Cihaz Tarama (yarı otomatik: bul -> listele -> isim ver -> ekle) =====
+let SCAN_RESULTS = [];
+
+function scanDevices() {
+    const el = document.getElementById("scanResults");
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("Bağlantı yok (WS), birkaç saniye sonra tekrar deneyin.");
+        return;
+    }
+    if (el) el.innerHTML = `<div class="scan-box">⏳ Ağ taranıyor...</div>`;
+    ws.send(JSON.stringify({ type: "scan_devices", reqId: wsReqCounter++ }));
+}
+
+function renderScanResults(devices) {
+    SCAN_RESULTS = devices;
+    const el = document.getElementById("scanResults");
+    if (!el) return;
+    if (!devices.length) {
+        el.innerHTML = `<div class="scan-box">Yeni cihaz bulunamadı (kayıtlı olanlar listelenmez).</div>`;
+        return;
+    }
+    el.innerHTML = `<div class="scan-box"><b>🔍 Bulunan cihazlar</b>` +
+        devices.map((d, idx) => `
+            <div class="scan-row">
+                <span>${d.ip} · ${d.mac} · ${d.hostname}.local</span>
+                <input type="text" id="scanName_${idx}" placeholder="Cihaz adı">
+                <button class="btn on" onclick="confirmScanDevice(${idx})">Ekle</button>
+            </div>`).join("") + `</div>`;
+}
+
+function confirmScanDevice(idx) {
+    const d = SCAN_RESULTS[idx];
+    const name = document.getElementById(`scanName_${idx}`).value.trim();
+    if (!d) return;
+    if (!name) { alert("Önce bir isim girin."); return; }
+
+    // Mevcut tablo satırlarındaki düzenlemeleri kaybetmemek için DOM'dan oku
+    const arr = readDeviceRows();
+    arr.push({ name, ip: d.ip });
+    if (!rowsValid(arr)) {
+        toast("⚠ Listede eksik IP'li satır var, önce onu düzeltin", true);
+        return;
+    }
+    postDevices(arr, `✓ ${name} eklendi`).then(() => renderSettings());
+}
+
+function restartHub() {
 
         fetch("/restart_hub");
         setTimeout(() => alert("Yeniden başlatılıyor..."), 500);
@@ -1470,8 +1578,8 @@ function renderWeather() {
                 </span>
             </div>
             
-            <!-- Ayarlar Formu -->
-            <table>
+            <!-- Ayarlar Formu - her alan degisince otomatik kaydedilir -->
+            <table id="weatherForm" onchange="autoSaveWeather()">
                 <tr><td>Aktif:</td><td><input type="checkbox" id="w_active" ${c.active?'checked':''}></td></tr>
                 <tr><td>Cihaz:</td><td><select id="w_dev">${DEVICES.map(d=>`<option value="${d.name}" ${c.device_name===d.name?'selected':''}>${d.name}</option>`).join('')}</select></td></tr>
                 <tr><td>Röle:</td><td><select id="w_rel"><option value="1" ${c.relay_id==1?'selected':''}>Röle 1</option><option value="2" ${c.relay_id==2?'selected':''}>Röle 2</option></select></td></tr>
@@ -1487,7 +1595,6 @@ function renderWeather() {
             
             <!-- Butonlar -->
             <div style="display:flex;flex-direction:column;gap:10px">
-                <button class="btn on" id="saveWeatherBtn" onclick="saveWeather()">💾 Ayarları Kaydet</button>
                 <button class="btn" id="refreshWeatherBtn" onclick="refreshWeather()" style="background:#2196F3">🔄 Hava Durumunu Güncelle</button>
             </div>
         </div>`;
@@ -1496,7 +1603,12 @@ function renderWeather() {
     });
 }
 
+function autoSaveWeather() {
+    debounceSave("weather", saveWeather, 600);
+}
+
 function saveWeather() {
+    const addrBefore = [WEATHER_CONFIG.city || "", WEATHER_CONFIG.district || "", WEATHER_CONFIG.neighbourhood || ""].join("|");
     const cfg = {
         active: document.getElementById('w_active').checked,
         device_name: document.getElementById('w_dev').value,
@@ -1510,47 +1622,29 @@ function saveWeather() {
         latitude: "",
         longitude: ""
     };
-    
-    const saveBtn = document.getElementById('saveWeatherBtn');
-    const originalText = saveBtn.textContent;
-    
-    saveBtn.disabled = true;
-    saveBtn.textContent = "⏳ Kaydediliyor...";
-    
+    const addrChanged = [cfg.city, cfg.district, cfg.neighbourhood].join("|") !== addrBefore;
+
     fetch("/save_weather_config", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(cfg)
     })
     .then(r => {
-        if(r.ok) {
-            saveBtn.textContent = "✅ Kaydedildi";
-            saveBtn.style.background = "#4CAF50";
+        if (!r.ok) throw new Error();
+        Object.assign(WEATHER_CONFIG, cfg);
+        if (addrChanged) {
+            toast("✓ Konum kaydedildi, hava verisi yenileniyor...");
+            // Konum/hava bilgisi sayfada gorunuyor - kullanici baska alana
+            // yazmiyorsa birkac sn sonra tazele (odak kacirmamak icin)
             setTimeout(() => {
-                saveBtn.textContent = originalText;
-                saveBtn.style.background = "";
-                saveBtn.disabled = false;
-                location.reload();
-            }, 2000);
+                const a = document.activeElement;
+                if (location.pathname === "/weather" && !(a && (a.tagName === "INPUT" || a.tagName === "SELECT"))) navigate();
+            }, 5000);
         } else {
-            saveBtn.textContent = "❌ Hata";
-            saveBtn.style.background = "#cf6679";
-            setTimeout(() => {
-                saveBtn.textContent = originalText;
-                saveBtn.style.background = "";
-                saveBtn.disabled = false;
-            }, 3000);
+            toast("✓ Ayarlar kaydedildi");
         }
     })
-    .catch(() => {
-        saveBtn.textContent = "❌ Bağlantı Hatası";
-        saveBtn.style.background = "#cf6679";
-        setTimeout(() => {
-            saveBtn.textContent = originalText;
-            saveBtn.style.background = "";
-            saveBtn.disabled = false;
-        }, 3000);
-    });
+    .catch(() => toast("✗ Ayarlar kaydedilemedi", true));
 }
 
 function refreshWeather() {
@@ -1567,14 +1661,14 @@ function refreshWeather() {
     })
     .then(r => {
         if(r.ok) {
-            refreshBtn.textContent = "✅ Güncellendi";
-            refreshBtn.style.background = "#4CAF50";
+            // Sunucu yenilemeyi hava gorevine devrediyor (HTTPS 1-3sn) -
+            // yeni veri gelmeden sayfayi tazelememek icin biraz bekle
+            refreshBtn.textContent = "⏳ Veri çekiliyor...";
             setTimeout(() => {
                 refreshBtn.textContent = originalText;
-                refreshBtn.style.background = "";
                 refreshBtn.disabled = false;
                 location.reload();
-            }, 2000);
+            }, 5000);
         } else {
             refreshBtn.textContent = "❌ Hata";
             refreshBtn.style.background = "#cf6679";
@@ -1623,7 +1717,10 @@ function navigate() {
 window.onload = function() {
     window.onpopstate = navigate;
     navigate();
-    setInterval(update, 2000); // Her 2 saniyede bir durum güncelle
+    connectWS();
+    // Artık asıl güncellemeler WS push ile geliyor - bu sadece WS
+    // koparsa (ev ağı kararsız olabilir) diye yedek/geç bir fallback.
+    setInterval(update, 15000);
 };
 </script>
 </body>
