@@ -20,13 +20,72 @@ void loadDevices() {
   Serial.println("Varsayılan cihaz listesi yüklendi.");
 }
 
+// sunriseAction/sunsetAction RAM dizileri cihazin LISTEDEKI SIRASIYLA tutuluyor.
+// Liste degisince (silme/ekleme/siralama) bastan kurulmazsa ayarlar kayip yanlis
+// lambaya uygulanirdi. Once tum konumlari temizle, sonra ada gore doldur.
+static void rebuildSunActions() {
+  for (int i = 0; i < MAX_DEVICES; i++)
+    for (int r = 0; r < MAX_RELAYS; r++) { sunriseAction[i][r] = ""; sunsetAction[i][r] = ""; }
+  int devIdx = 0;
+  for (JsonObject device : doc.as<JsonArray>()) {
+    if (devIdx >= MAX_DEVICES) break;
+    String name = device["name"] | "";
+    if (name == "") { devIdx++; continue; }
+    for (int r = 0; r < MAX_RELAYS; r++) {
+      String rKey = "r" + String(r + 1);
+      sunriseAction[devIdx][r] = SCHEDULE_CONFIG_DOC[name][rKey + "_sunrise_act"] | String("");
+      sunsetAction[devIdx][r]  = SCHEDULE_CONFIG_DOC[name][rKey + "_sunset_act"]  | String("");
+    }
+    devIdx++;
+  }
+}
+
 void saveDevices(String json) {
+  // Ad degisikligini yakalamak icin eski MAC -> ad eslemesi
+  std::vector<std::pair<String, String>> oldMacName;
+  for (JsonObject d : doc.as<JsonArray>()) {
+    String mac = d["mac"] | "";
+    if (mac.length()) oldMacName.push_back({mac, d["name"] | String("")});
+  }
+
   File f = LittleFS.open(DEVICES_FILE, "w");
   if (f) {
     f.print(json);
     f.close();
     DEVICE_LIST_JSON = json;
     deserializeJson(doc, DEVICE_LIST_JSON);
+
+    // Yeniden adlandirilan cihaz (ayni MAC, yeni ad): zamanlayici ve bulut
+    // otomasyonu ada bagli - eskiden ad degisince baglanti sessizce kopuyordu.
+    for (JsonObject d : doc.as<JsonArray>()) {
+      String mac = d["mac"] | "";
+      String newName = d["name"] | "";
+      if (!mac.length() || !newName.length()) continue;
+      for (auto& mn : oldMacName) {
+        if (mn.first != mac || mn.second == newName || !mn.second.length()) continue;
+        const String& oldName = mn.second;
+        if (xSemaphoreTake(scheduleMutex, MUTEX_TIMEOUT) == pdTRUE) {
+          if (SCHEDULE_CONFIG_DOC[oldName].is<JsonObject>()) {
+            SCHEDULE_CONFIG_DOC[newName].set(SCHEDULE_CONFIG_DOC[oldName]);
+            SCHEDULE_CONFIG_DOC.remove(oldName);
+            saveScheduleConfig();
+          }
+          xSemaphoreGive(scheduleMutex);
+        }
+        if (xSemaphoreTake(weatherMutex, MUTEX_TIMEOUT) == pdTRUE) {
+          if ((WEATHER_CONFIG_DOC["device_name"] | String("")) == oldName) {
+            WEATHER_CONFIG_DOC["device_name"] = newName;
+            saveWeatherConfig();
+          }
+          xSemaphoreGive(weatherMutex);
+        }
+        Serial.printf("[Cihaz] yeniden adlandirildi: %s -> %s (ayarlar tasindi)\n", oldName.c_str(), newName.c_str());
+      }
+    }
+    if (xSemaphoreTake(scheduleMutex, MUTEX_TIMEOUT) == pdTRUE) {
+      rebuildSunActions();
+      xSemaphoreGive(scheduleMutex);
+    }
 
     // Silinen/yeniden adlandirilan cihazlarin durum kaydini temizle - yoksa
     // eski ad "hayalet" OFFLINE kayit olarak durum verisinde kaliyordu
@@ -60,22 +119,8 @@ void loadScheduleConfig() {
       if (!err) {
         Serial.println("Schedule ayarları yüklendi.");
 
-        // DÜZELTİLDİ: RAM dizileri (sunriseAction/sunsetAction)
-        // restart sonrası sıfırlanıyor — JSON'dan geri yükle
-        int devIdx = 0;
-        for (JsonObject device : doc.as<JsonArray>()) {
-          if (devIdx >= MAX_DEVICES) break;
-          String name = device["name"] | "";
-          if (name == "") { devIdx++; continue; }
-          for (int r = 0; r < MAX_RELAYS; r++) {
-            String rKey = "r" + String(r + 1);
-            String srKey = rKey + "_sunrise_act";
-            String ssKey = rKey + "_sunset_act";
-            sunriseAction[devIdx][r] = SCHEDULE_CONFIG_DOC[name][srKey] | String("");
-            sunsetAction[devIdx][r]  = SCHEDULE_CONFIG_DOC[name][ssKey] | String("");
-          }
-          devIdx++;
-        }
+        // RAM dizileri (sunriseAction/sunsetAction) restart sonrası sıfırlanıyor — JSON'dan geri yükle
+        rebuildSunActions();
         return;
       }
     }

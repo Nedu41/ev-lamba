@@ -336,6 +336,12 @@ static void setScenePalette(Scene sc, bool day) {
     default: break;
   }
   if (!day && sc != SC_CLEAR && sc != SC_PARTLY) { k = 0.45f; kc = 0.6f; }
+  // Kapali/sisli/ciselemede gok cismi bulutlarin arkasindan soluk gorunur:
+  // gunduz solgun gunes, gece ay - gece/gunduz her havada ayirt edilsin
+  if (sc != SC_CLEAR && sc != SC_PARTLY) {
+    if (day) set3(acc, 235,225,170);
+    else set3(acc, 225,222,195);
+  }
 
   for (int i = 0; i < 4; i++) {
     skyColors[i] = shade(sky[i], k);
@@ -355,7 +361,8 @@ static Drop drops[70];
 static int dropCount = 0;
 static Cloud cloudsA[6];
 static int cloudCount = 0;
-static Star stars[28];
+static const int STAR_COUNT = 40;
+static Star stars[STAR_COUNT];
 static uint32_t frameNo = 0;
 static uint32_t nextStrikeMs = 0, strikeEndMs = 0;
 static int16_t boltX[7], boltY[7];
@@ -386,7 +393,7 @@ static void initScene(Scene sc) {
     c.v = frand(5, 14);
   }
 
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < STAR_COUNT; i++) {
     stars[i].x = (int16_t)frand(2, SCENE_W - 2);
     stars[i].y = (int16_t)frand(2, SCENE_H - 2);
     stars[i].ph = (uint8_t)frand(0, 50);
@@ -415,21 +422,62 @@ static void drawSun(int cx, int cy, float t) {
   scene.fillCircle(cx, cy, 16 + (int)sinf(t * 1.5f), P_ACCENT);
 }
 
-static void drawMoon(int cx, int cy) {
-  scene.fillCircle(cx, cy, 15, P_ACCENT);
-  // hilal: ustune gokyuzu renginde kaydirilmis daire (WIN_MID 3. gok bandinda)
-  scene.fillCircle(cx + 7, cy - 5, 13, P_SKY3);
+// Gercek ay evresi: 0 = yeni ay, 0.5 = dolunay. Bilinen yeni ay 2000-01-06
+// 18:14 UTC + sinodik ay 29.530588853 gun. Dogrulandi: 2024-04-08 gunes
+// tutulmasi -> 0.994, 2025-03-14 ay tutulmasi -> 0.492.
+static float moonPhase() {
+  time_t now = time(nullptr);
+  if (now < 1600000000) return 0.5f;  // saat henuz senkron degil: dolunay goster
+  double p = fmod((now - 947182440.0) / 86400.0 / 29.530588853, 1.0);
+  return (float)(p < 0 ? p + 1 : p);
+}
+
+static void drawMoon(int cx, int cy, float phase) {
+  const int R = 15;
+  float c = cosf(2 * PI * phase);
+  float litFrac = (1 - c) / 2;
+  bool waxing = phase < 0.5f;  // buyuyen: sagdan aydinlik (kuzey yarimkure)
+
+  if (litFrac > 0.2f) {  // hafif hare
+    scene.drawCircle(cx, cy, R + 3, P_SKY4);
+    scene.drawCircle(cx, cy, R + 5, P_SKY3);
+  }
+  // Ay denizleri (maria) - yuzeydeki koyu lekeler, merkeze gore (dx, dy, r)
+  static const int8_t MARIA[][3] = {{-5, -5, 4}, {3, -6, 3}, {-2, 2, 5}, {5, 4, 3}, {-7, 6, 2}};
+  for (int y = -R; y <= R; y++) {
+    float w = sqrtf((float)(R * R - y * y));
+    float term = w * c;  // golge siniri (terminator)
+    int x0 = waxing ? (int)roundf(term) : (int)roundf(-w);
+    int x1 = waxing ? (int)roundf(w) : (int)roundf(-term);
+    if (x1 <= x0) continue;  // bu satir tamamen karanlik (gorunmez, gokyuzu kalir)
+    scene.drawFastHLine(cx + x0, cy + y, x1 - x0, P_ACCENT);
+    for (auto& m : MARIA) {
+      int dy = y - m[1];
+      if (abs(dy) > m[2]) continue;
+      int mw = (int)sqrtf((float)(m[2] * m[2] - dy * dy));
+      int a = max(x0, m[0] - mw), b = min(x1, m[0] + mw);
+      if (b > a) scene.drawFastHLine(cx + a, cy + y, b - a, P_GRAY);
+    }
+  }
+}
+
+// Bulutlarin arkasindaki soluk gunes (isinsiz disk)
+static void drawDimSun(int cx, int cy) {
+  scene.drawCircle(cx, cy, 20, P_SKY4);
+  scene.fillCircle(cx, cy, 16, P_ACCENT);
 }
 
 static void drawStars() {
-  for (int i = 0; i < 28; i++) {
-    bool on = ((frameNo + stars[i].ph) % 50) < 38;
-    scene.drawPixel(stars[i].x, stars[i].y, on ? P_WHITE : P_SKY2);
-    if (on && (i % 5 == 0)) {  // birkac parlak yildiz: kucuk arti
-      scene.drawPixel(stars[i].x - 1, stars[i].y, P_WHITE);
-      scene.drawPixel(stars[i].x + 1, stars[i].y, P_WHITE);
-      scene.drawPixel(stars[i].x, stars[i].y - 1, P_WHITE);
-      scene.drawPixel(stars[i].x, stars[i].y + 1, P_WHITE);
+  for (int i = 0; i < STAR_COUNT; i++) {
+    bool bright = (i % 3 == 0);                        // ~1/3 parlak, gerisi sonuk
+    bool on = ((frameNo + stars[i].ph) % 50) < 40;     // titresim
+    uint8_t col = bright ? (on ? P_WHITE : P_GRAY) : (on ? P_GRAY : P_SKY3);
+    scene.drawPixel(stars[i].x, stars[i].y, col);
+    if (bright && on && (i % 9 == 0)) {  // en parlaklar: kucuk arti
+      scene.drawPixel(stars[i].x - 1, stars[i].y, P_GRAY);
+      scene.drawPixel(stars[i].x + 1, stars[i].y, P_GRAY);
+      scene.drawPixel(stars[i].x, stars[i].y - 1, P_GRAY);
+      scene.drawPixel(stars[i].x, stars[i].y + 1, P_GRAY);
     }
   }
 }
@@ -508,10 +556,17 @@ static void drawFog(float t) {
 
 static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   drawSky();
-  if ((sc == SC_CLEAR || sc == SC_PARTLY) && !day) drawStars();
-  if (sc == SC_CLEAR || sc == SC_PARTLY) {
-    if (day) drawSun(160, WIN_MID, t);
-    else drawMoon(160, WIN_MID);
+  bool openSky = (sc == SC_CLEAR || sc == SC_PARTLY);
+  if (openSky && !day) drawStars();
+  // Gok cismi bulutlardan ONCE cizilir: bulutlar gecerken onu ortup acar.
+  // Yagmur/kar/firtinada yogun bulut - gorunmez.
+  if (sc != SC_RAIN && sc != SC_SNOW && sc != SC_THUNDER) {
+    if (day) {
+      if (openSky) drawSun(160, WIN_MID, t);
+      else drawDimSun(160, WIN_MID);
+    } else {
+      drawMoon(160, WIN_MID, moonPhase());
+    }
   }
   if (sc == SC_FOG) drawFog(t);
   updateClouds(dt);
