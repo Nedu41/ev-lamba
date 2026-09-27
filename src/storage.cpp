@@ -1,5 +1,6 @@
 #include "storage.h"
 #include <LittleFS.h>
+#include <vector>
 #include "app_state.h"
 
 // ============== LittleFS operations ==============
@@ -26,6 +27,22 @@ void saveDevices(String json) {
     f.close();
     DEVICE_LIST_JSON = json;
     deserializeJson(doc, DEVICE_LIST_JSON);
+
+    // Silinen/yeniden adlandirilan cihazlarin durum kaydini temizle - yoksa
+    // eski ad "hayalet" OFFLINE kayit olarak durum verisinde kaliyordu
+    if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
+      JsonObject st = CURRENT_STATUS_DOC.as<JsonObject>();
+      std::vector<String> stale;
+      for (JsonPair kv : st) {
+        bool inList = false;
+        for (JsonObject d : doc.as<JsonArray>()) {
+          if ((d["name"] | String("")) == kv.key().c_str()) { inList = true; break; }
+        }
+        if (!inList) stale.push_back(kv.key().c_str());
+      }
+      for (const String& k : stale) st.remove(k);
+      xSemaphoreGive(statusMutex);
+    }
     Serial.println("Cihazlar kaydedildi.");
   } else {
     Serial.println("HATA: devices.json yazılamadı.");
