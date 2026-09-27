@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Merkezi Hub v5.5 (MQTT)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+body { font-family: Arial; background:#121212; color:#eee; margin:0; }
+.header { background:#222; color:#03dac6; padding:12px; text-align:center; }
+.grid { display:grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap:10px; padding:10px; }
+.card { background:#1e1e1e; border-radius:10px; padding:10px; border:1px solid #333; }
+.btn { padding:10px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; width:100%; }
+.on { background:#03dac6; color:#000; }
+.off { background:#333; color:#ccc; }
+</style>
+</head>
+<body>
+
+<div class="header">MERKEZİ HUB (DIŞ ERİŞİM - MQTT)</div>
+<div class="grid">
+
+<div class="card">
+  <h4>RÖLE 1</h4>
+  <button id="r1" class="btn off" onclick="setRelay(1)">...</button>
+</div>
+
+<div class="card">
+  <h4>RÖLE 2</h4>
+  <button id="r2" class="btn off" onclick="setRelay(2)">...</button>
+</div>
+
+</div>
+
+<script>
+const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+
+const topicSet1   = "evhub/relay/1/set";
+const topicState1 = "evhub/relay/1/state";
+const topicSet2   = "evhub/relay/2/set";
+const topicState2 = "evhub/relay/2/state";
+
+client.on("connect", () => {
+  console.log("MQTT Bağlandı");
+  client.subscribe(topicState1);
+  client.subscribe(topicState2);
+});
+
+client.on("message", (topic, message) => {
+  const val = message.toString();
+
+  if(topic === topicState1){
+    const btn = document.getElementById("r1");
+    btn.textContent = val === "1" ? "AÇIK" : "KAPALI";
+    btn.className = "btn " + (val === "1" ? "on" : "off");
+  }
+
+  if(topic === topicState2){
+    const btn = document.getElementById("r2");
+    btn.textContent = val === "1" ? "AÇIK" : "KAPALI";
+    btn.className = "btn " + (val === "1" ? "on" : "off");
+  }
+});
+
+function setRelay(id){
+  const btn = document.getElementById(id === 1 ? "r1" : "r2");
+  const isOn = btn.textContent === "AÇIK";
+  const cmd = isOn ? "0" : "1";
+
+  client.publish(
+    id === 1 ? topicSet1 : topicSet2,
+    cmd,
+    {retain:true}
+  );
+}
+</script>
+
+</body>
+</html>
