@@ -18,7 +18,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .header { background: #222; color: #03dac6; padding: 12px; text-align: center; font-size: 1.1em; font-weight: bold; border-bottom: 2px solid #333; display: flex; justify-content: space-between; align-items: center; }
 .header span { font-size: 0.8em; color: #888; }
 .fwver { font-size: 0.6em; color: #9a9a9a; font-weight: normal; margin-left: 4px; }
-.nav { background: #1a1a1a; padding: 8px; display: flex; justify-content: center; gap: 15px; border-bottom: 1px solid #333; }
+.nav { background: #1a1a1a; padding: 8px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; border-bottom: 1px solid #333; }
 .nav a { color: #888; text-decoration: none; font-size: 0.9em; padding: 5px 10px; border-radius: 4px; transition: 0.3s; }
 .nav a.active { background: #3700b3; color: #fff; }
 
@@ -596,6 +596,10 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
 .dev-card-row .mac-box-compact, .dev-card-row .rssi-value-compact { flex: 1; max-width: none; text-align: left; }
 .mini-btn { background: #333; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
 .feat-icons { font-size: 0.85em; margin-left: 4px; }
+.note-row { display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-bottom: 1px solid #333; }
+.note-row input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; }
+.note-text { flex: 1; word-break: break-word; }
+.note-row.done .note-text { color: #666; text-decoration: line-through; }
 .devices-container { max-width: 900px; margin: 10px auto; padding: 10px; }
 .devices-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .devices-header-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -618,6 +622,7 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
   <a href="/settings" id="nav2" onclick="route('/settings');return false;">Cihazlar</a>
   <a href="/weather" id="nav3" onclick="route('/weather');return false;">Oto-Hava</a>
   <a href="/log" id="nav4" onclick="route('/log');return false;">Kayıt</a>
+  <a href="/notes" id="nav5" onclick="route('/notes');return false;">Notlar</a>
 </div>
 
 <div id="content">Yükleniyor...</div>
@@ -1688,6 +1693,76 @@ function renderEvents() {
     }).catch(() => {});
 }
 
+// --- NOTLAR SAYFASI (HUB'da kalici: /get_notes, /save_notes) ---
+let NOTES = [];
+
+function renderNotes() {
+    fetch("/get_notes").then(r => r.json()).then(list => {
+        NOTES = Array.isArray(list) ? list : [];
+        drawNotes();
+    }).catch(() => {
+        document.getElementById("content").innerHTML = `<div class="settings-container">✗ Notlar yüklenemedi</div>`;
+    });
+}
+
+function drawNotes() {
+    const fmt = c => c ? new Date(c * 1000).toLocaleDateString('tr-TR', {day: 'numeric', month: 'short'}) : '';
+    // Yapilmamislar ustte, her grupta en yeni ustte
+    const order = NOTES.map((n, i) => i).sort((a, b) => (NOTES[a].d - NOTES[b].d) || ((NOTES[b].c || 0) - (NOTES[a].c || 0)));
+    const rows = order.map(i => {
+        const n = NOTES[i];
+        return `
+        <div class="note-row${n.d ? ' done' : ''}">
+            <input type="checkbox" ${n.d ? 'checked' : ''} onchange="toggleNote(${i}, this.checked)">
+            <span class="note-text">${escHtml(n.t)}</span>
+            <small style="color:#888;white-space:nowrap">${fmt(n.c)}</small>
+            <button class="mini-btn" onclick="delNote(${i})" title="Sil">🗑️</button>
+        </div>`;
+    }).join('');
+    document.getElementById("content").innerHTML = `
+    <div class="settings-container">
+        <h3>📝 Notlar</h3>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+            <input type="text" id="noteInput" placeholder="Yeni not..." onkeydown="if(event.key==='Enter')addNote()">
+            <button class="btn" style="flex-grow:0;background:#03dac6;color:#000" onclick="addNote()">Ekle</button>
+        </div>
+        ${rows || '<div style="color:#888">Henüz not yok.</div>'}
+    </div>`;
+}
+
+function postNotes(msg) {
+    return fetch("/save_notes", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(NOTES)
+    }).then(r => {
+        if (!r.ok) throw new Error();
+        if (msg) toast(msg);
+    }).catch(() => toast("✗ Not kaydedilemedi", true));
+}
+
+function addNote() {
+    const el = document.getElementById("noteInput");
+    const t = el.value.trim();
+    if (!t) return;
+    NOTES.push({t, d: false, c: Math.floor(Date.now() / 1000)});
+    drawNotes();
+    postNotes("✓ Not eklendi");
+}
+
+function toggleNote(i, done) {
+    NOTES[i].d = done;
+    drawNotes();
+    postNotes();
+}
+
+function delNote(i) {
+    if (!confirm(`Silinsin mi?\n"${NOTES[i].t}"`)) return;
+    NOTES.splice(i, 1);
+    drawNotes();
+    postNotes("✓ Not silindi");
+}
+
 // --- NAVİGASYON ---
 function navigate() {
     const p = location.pathname;
@@ -1698,6 +1773,7 @@ function navigate() {
     else if(p === "/settings") document.getElementById("nav2").className = "active";
     else if(p === "/weather") document.getElementById("nav3").className = "active";
     else if(p === "/log") document.getElementById("nav4").className = "active";
+    else if(p === "/notes") document.getElementById("nav5").className = "active";
 
     // İlgili sayfayı render et
     if(p === "/settings") {
@@ -1706,6 +1782,8 @@ function navigate() {
         renderEvents();
     } else if(p === "/weather") {
         fetchDevices().then(renderWeather);
+    } else if(p === "/notes") {
+        renderNotes();
     } else if(p === "/device") {
         document.getElementById("nav2").className = "active";
         fetchDevices().then(renderDevice);

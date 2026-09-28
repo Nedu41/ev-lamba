@@ -582,6 +582,24 @@ void setupWebServer() {
   server.on("/weather", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/log", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/device", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/notes", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/get_notes", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", readNotes());
+  });
+  server.on("/save_notes", AsyncWebRequestMethod::HTTP_POST,
+    [](AsyncWebServerRequest *request) {},
+    nullptr,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (index == 0) request->_tempObject = new String();
+      String *body = (String *)request->_tempObject;
+      body->concat((const char *)data, len);
+      if (index + len == total) {
+        bool ok = saveNotes(*body);
+        delete body;
+        request->_tempObject = nullptr;
+        request->send(ok ? 200 : 400, "text/plain", ok ? "OK" : "HATA");
+      }
+    });
   server.on("/events", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", eventsJson());
   });

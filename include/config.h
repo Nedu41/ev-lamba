@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Web arayuzu basliginda ve TFT ust seridinde gosterilir - tek kaynak burasi
-#define FW_VERSION "6.3.4"
+#define FW_VERSION "6.3.5"
 
 // ---- Donanim ----
 #define BACKLIGHT_PIN 21
@@ -33,4 +33,5 @@ const int NEWS_MAX_ITEMS = 6;
 #define DEVICES_FILE "/devices.json"
 #define SCHEDULE_FILE "/devices_schedule.json"
 #define WEATHER_CONFIG_FILE "/weather_config.json"
+#define NOTES_FILE "/notes.json"
 

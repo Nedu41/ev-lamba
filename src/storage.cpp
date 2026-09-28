@@ -151,6 +151,28 @@ void saveScheduleConfig() {
   }
 }
 
+// Notlar sayfasi: [{t: metin, d: yapildi, c: olusturma (unix)}] - HUB'da
+// kalici, hangi telefondan acilirsa acilsin ayni liste
+String readNotes() {
+  if (!LittleFS.exists(NOTES_FILE)) return "[]";
+  File f = LittleFS.open(NOTES_FILE, "r");
+  if (!f) return "[]";
+  String s = f.readString();
+  f.close();
+  return s.length() ? s : "[]";
+}
+
+bool saveNotes(const String& json) {
+  if (json.length() > 8192) return false;
+  JsonDocument check;
+  if (deserializeJson(check, json) || !check.is<JsonArray>()) return false;
+  File f = LittleFS.open(NOTES_FILE, "w");
+  if (!f) return false;
+  f.print(json);
+  f.close();
+  return true;
+}
+
 void saveWeatherConfig() {
   File f = LittleFS.open(WEATHER_CONFIG_FILE, "w");
   if (f) {
