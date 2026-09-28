@@ -65,7 +65,7 @@ String getDeviceStatusJson(const String& ip) {
 }
 // ============== Send control signal ==============
 // DEGISTI: WS control_result mesaji icin basari/hata bilgisi donduruluyor
-bool sendControlSignal(const String& ip, int relay, const String& action) {
+bool sendControlSignal(const String& ip, int relay, const String& action, const String& src) {
   if (ip == "" || relay == 0 || action == "") return false;
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -73,7 +73,7 @@ bool sendControlSignal(const String& ip, int relay, const String& action) {
   // cihaza komut 5sn bekliyor, tarayici 3sn'de "zaman asimi" diyordu; otomasyon
   // ve komut kuyrugu da her cevrimdisi cihaz icin 5sn kilitleniyordu.
   http.setConnectTimeout(800);
-  String url = "http://" + ip + "/control?id=" + String(relay) + "&action=" + action;
+  String url = "http://" + ip + "/control?id=" + String(relay) + "&action=" + action + "&src=" + src;
   http.begin(url);
   int code = http.GET();
   http.end();

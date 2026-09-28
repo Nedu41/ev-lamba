@@ -6,6 +6,7 @@
 #include "telegram.h"
 #include "display.h"
 #include "web_server.h"
+#include "events.h"
 
 // ============== Existing weatherControlLogic ==============
 void weatherControlLogic(int currentMinute) {
@@ -36,32 +37,18 @@ void weatherControlLogic(int currentMinute) {
 
   int lightnessScore = CURRENT_WEATHER_DOC["lightness_score"] | 0;
   int threshold       = WEATHER_CONFIG_DOC["threshold"]   | 3;
+  float radiation     = CURRENT_WEATHER_DOC["radiation"] | -1.0f;
+  float lightOn       = WEATHER_CONFIG_DOC["light_threshold"] | 60;
   String deviceName   = WEATHER_CONFIG_DOC["device_name"] | "";
   int relayId          = WEATHER_CONFIG_DOC["relay_id"]    | 0;
   String action        = WEATHER_CONFIG_DOC["action"]      | "ON";
 
   xSemaphoreGive(weatherMutex);  // Her durumda serbest bırak
 
-  if (!isDaytime) return;
+  // Gece: otomasyon kontrolu birakir (gece aydinlatmayi gunbatimi/zamanlayici
+  // yonetir); ertesi sabah geceden kalan bir durumu "geri alma"ya kalkmasin
+  if (!isDaytime) { lastWeatherDesired = ""; return; }
   if (deviceName == "" || relayId < 1 || relayId > MAX_RELAYS) return;
-
-  // BUGFIX: bu fonksiyon eskiden isDaytime hesaplayip hicbir sey yapmadan donuyordu
-  // ("Gunduz mantigi buraya eklenebilir" yorumuyla) - esik/bulut karsilastirmasi hic
-  // yapilmiyordu, weather_config'teki threshold/action/device_name/relay_id alanlari
-  // olu veriydi. Simdi lightness_score (1=acik,2=parcali,3=kapali) >= threshold oldugunda
-  // konfigure edilen action gonderiliyor. Kenar-tetiklemeli: ayni "kapali" donem icinde
-  // tekrar tekrar komut gonderilmesin diye lastWeatherDesired ile tek seferlik tetikleniyor;
-  // hava acilinca sifirlanip bir sonraki kapanmada tekrar tetiklenebiliyor. Bu ozellik icin
-  // "acilinca ne yap" diye ayri bir alan olmadigindan otomatik ters islem gonderilmiyor -
-  // normal schedule/manuel kontrol geri almayi ustleniyor.
-  bool conditionMet = (lightnessScore >= threshold);
-
-  if (!conditionMet) {
-    lastWeatherDesired = "";  // yeni bir kapanma doneminde tekrar tetiklenebilsin
-    return;
-  }
-
-  if (lastWeatherDesired == action) return;  // bu donem icin zaten gonderildi
 
   String ip = "";
   for (JsonObject device : doc.as<JsonArray>()) {
@@ -72,12 +59,41 @@ void weatherControlLogic(int currentMinute) {
   }
   if (ip == "") return;
 
-  sendControlSignal(ip, relayId, action == "ON" ? "on" : "off");
-  lastWeatherDesired = action;
-  lastWeatherControlAction = millis();
-  setForceRefresh();
-  Serial.printf("[WeatherCtrl] %s R%d %s (lightness_score=%d >= threshold=%d)\n",
-                deviceName.c_str(), relayId, action.c_str(), lightnessScore, threshold);
+  // Karanlik mi? Gercek isik (gunes isinimi W/m2) varsa onunla, yoksa eski
+  // bulut skoruyla. Eskiden %100 bulut/yagmur kodu = "karanlik" sayiliyordu;
+  // disarisi aydinlik olsa bile (olcum: yagmurlu 11:30'da 88 W/m2) lamba yaniyordu.
+  // Histerezis: esigin altinda "karanlik", esigin %30 ustunde "aydinlik", arada
+  // durum korunur - isik esik civarinda dalgalanirken lamba acip kapanmasin.
+  bool dark, bright;
+  if (radiation >= 0) {
+    dark = radiation < lightOn;
+    bright = radiation > lightOn * 1.3f;
+  } else {
+    dark = lightnessScore >= threshold;
+    bright = !dark;
+  }
+
+  if (dark) {
+    if (lastWeatherDesired == action) return;  // bu donem icin zaten gonderildi
+    bool ok = sendControlSignal(ip, relayId, action == "ON" ? "on" : "off", "bulut");
+    addEvent(deviceName, relayId, action == "ON", "bulut", ok);
+    lastWeatherDesired = action;
+    lastWeatherControlAction = millis();
+    setForceRefresh();
+    return;
+  }
+
+  // Aydinlandi: beklemeden geri al - ama sadece BIZIM yaptigimizi, ve bu arada
+  // web'den elle mudahale edildiyse dokunma. Histerezis bandindaysa bekle.
+  if (!bright || lastWeatherDesired != action) return;
+
+  if (lastManualControlAction <= lastWeatherControlAction) {
+    bool revertOn = (action != "ON");
+    bool ok = sendControlSignal(ip, relayId, revertOn ? "on" : "off", "bulut-geri");
+    addEvent(deviceName, relayId, revertOn, "bulut-geri", ok);
+    setForceRefresh();
+  }
+  lastWeatherDesired = "";
 }
 
 // ============== handleSunSchedule ==============
@@ -136,47 +152,25 @@ void handleSunSchedule(int currentMinute) {
 
         if (useSunrise && sunriseWindow) {
           sunriseDone[devIdx][r] = true;
-          sendControlSignal(ip, r+1, sunriseAct == "ON" ? "on" : "off");
+          bool ok = sendControlSignal(ip, r+1, sunriseAct == "ON" ? "on" : "off", "gundogumu");
+          addEvent(name, r + 1, sunriseAct == "ON", "gundogumu", ok);
           setForceRefresh();
           Serial.printf("[SunSched] %s R%d %s (Gündoğumu: %s)\n",
                         name.c_str(), r+1, sunriseAct.c_str(), sunriseStr.c_str());
         }
         if (useSunset && sunsetWindow) {
           sunsetDone[devIdx][r] = true;
-          sendControlSignal(ip, r+1, sunsetAct == "ON" ? "on" : "off");
+          bool ok = sendControlSignal(ip, r+1, sunsetAct == "ON" ? "on" : "off", "gunbatimi");
+          addEvent(name, r + 1, sunsetAct == "ON", "gunbatimi", ok);
           setForceRefresh();
           Serial.printf("[SunSched] %s R%d %s (Günbatımı: %s)\n",
                         name.c_str(), r+1, sunsetAct.c_str(), sunsetStr.c_str());
         }
-      } else {
-        // Sabit zaman schedule
-        if (xSemaphoreTake(scheduleMutex, MUTEX_TIMEOUT) == pdTRUE) {
-          String rKey   = "r" + String(r+1);
-          String start  = SCHEDULE_CONFIG_DOC[name][rKey + "_start"] | "";
-          String end    = SCHEDULE_CONFIG_DOC[name][rKey + "_end"]   | "";
-          int daysMask  = SCHEDULE_CONFIG_DOC[name][rKey + "_days"]  | 0;
-
-          if (start != "" && end != "" && (daysMask & (1 << currentDay))) {
-            int startMin = start.substring(0,2).toInt()*60 + start.substring(3,5).toInt();
-            int endMin   = end.substring(0,2).toInt()*60   + end.substring(3,5).toInt();
-
-            // DÜZELTİLDİ: ±1 dakika tolerans (60 sn görev gecikmesine karşı)
-            bool atStart = (currentMinute == startMin || currentMinute == startMin + 1);
-            bool atEnd   = (currentMinute == endMin   || currentMinute == endMin + 1);
-
-            if (atStart) {
-              sendControlSignal(ip, r+1, "on");
-              setForceRefresh();
-              Serial.printf("[TimeSched] %s R%d ON (%s)\n", name.c_str(), r+1, start.c_str());
-            } else if (atEnd) {
-              sendControlSignal(ip, r+1, "off");
-              setForceRefresh();
-              Serial.printf("[TimeSched] %s R%d OFF (%s)\n", name.c_str(), r+1, end.c_str());
-            }
-          }
-          xSemaphoreGive(scheduleMutex);
-        }
       }
+      // NOT: saatli baslangic/bitis HUB'da DEGIL - ESP01'in kendi olay tabanli
+      // zamanlayicisi (v2.5) yapiyor; HUB da gondersin diye ikinci bir kaynak
+      // olmasin. Eskiden HUB, gunbatimi/dogumu secili rolenin saatli kapanisini
+      // tamamen yok sayiyordu.
     }
     devIdx++;
   }
@@ -227,7 +221,6 @@ void windAlertLogic() {
 
 void updateWeatherAndControlTask(void* pvParameters) {
   unsigned long lastWeatherUpdate = 0;
-  unsigned long lastNewsUpdate = 0;
   const unsigned long WEATHER_UPDATE_INTERVAL = 600000;  // 10 dakika
   bool firstRun = true;
 
@@ -241,11 +234,10 @@ void updateWeatherAndControlTask(void* pvParameters) {
       updateWeatherFromConfig();
       lastWeatherUpdate = currentTime;
     }
+    // NOT: haber cekme (fetchNews) artik displayTask icinde - TLS'in istedigi
+    // tek parca buyuk bellegi ekran sprite'larini gecici silip acmak icin
+    // sprite'larin SAHIBI olan task'ta yapilmasi gerekiyor (bkz. display.cpp)
 
-    if (firstRun || currentTime - lastNewsUpdate >= NEWS_UPDATE_INTERVAL) {
-      fetchNews();
-      lastNewsUpdate = currentTime;
-    }
     firstRun = false;
 
     struct tm timeinfo;

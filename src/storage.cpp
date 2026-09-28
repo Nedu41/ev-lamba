@@ -83,6 +83,17 @@ void saveDevices(String json) {
       }
     }
     if (xSemaphoreTake(scheduleMutex, MUTEX_TIMEOUT) == pdTRUE) {
+      // Listede olmayan (silinmis) cihazlarin zamanlayici kaydini temizle
+      std::vector<String> staleSched;
+      for (JsonPair kv : SCHEDULE_CONFIG_DOC.as<JsonObject>()) {
+        bool inList = false;
+        for (JsonObject d : doc.as<JsonArray>()) {
+          if ((d["name"] | String("")) == kv.key().c_str()) { inList = true; break; }
+        }
+        if (!inList) staleSched.push_back(kv.key().c_str());
+      }
+      for (const String& k : staleSched) SCHEDULE_CONFIG_DOC.remove(k);
+      if (!staleSched.empty()) saveScheduleConfig();
       rebuildSunActions();
       xSemaphoreGive(scheduleMutex);
     }
@@ -172,6 +183,9 @@ void loadWeatherConfig() {
   if (!WEATHER_CONFIG_DOC.containsKey("device_name")) WEATHER_CONFIG_DOC["device_name"] = "Yok";
   if (!WEATHER_CONFIG_DOC.containsKey("relay_id")) WEATHER_CONFIG_DOC["relay_id"] = 0;
   if (!WEATHER_CONFIG_DOC.containsKey("threshold")) WEATHER_CONFIG_DOC["threshold"] = 3;
+  // Isik esigi (W/m2): isinim bunun altina dusunce ac. Olcum 2026-09-28: yagmurlu
+  // kapali 11:30'da 88 W/m2 ("cok karanlik degil"), acik ogle ~600-700.
+  if (!WEATHER_CONFIG_DOC.containsKey("light_threshold")) WEATHER_CONFIG_DOC["light_threshold"] = 60;
   if (!WEATHER_CONFIG_DOC.containsKey("action")) WEATHER_CONFIG_DOC["action"] = "ON";
 
   // YENİ EKLEME: Rüzgar Hızı Eşiği (Km/s)

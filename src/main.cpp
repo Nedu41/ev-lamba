@@ -42,6 +42,7 @@
 #include "web_server.h"
 #include "mqtt_link.h"
 #include "telegram.h"
+#include "events.h"
 
 void setup() {
   Serial.begin(115200);
@@ -51,6 +52,7 @@ void setup() {
 
   // Semaphore yarat
   statusMutex = xSemaphoreCreateMutex();
+  initEvents();
   weatherMutex = xSemaphoreCreateMutex();
   newsMutex = xSemaphoreCreateMutex();
 

@@ -598,12 +598,30 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
   <a href="/" id="nav1" onclick="route('/');return false;">Panel</a>
   <a href="/settings" id="nav2" onclick="route('/settings');return false;">Cihazlar</a>
   <a href="/weather" id="nav3" onclick="route('/weather');return false;">Oto-Hava</a>
+  <a href="/log" id="nav4" onclick="route('/log');return false;">Kayıt</a>
 </div>
 
 <div id="content">Yükleniyor...</div>
 
 <script>
 let DEVICES = [], STATUS = {}, CURRENT_WEATHER = {}, WEATHER_CONFIG = {};
+// Zamanlayici ayarlarinin TEK kaynagi HUB (eskiden tarayicinin localStorage'i -
+// baska telefonda varsayilan degerler gorunuyordu)
+let SCHEDULE = {};
+function schedFor(name, r) {
+    const sc = SCHEDULE[name] || {}, k = 'r' + r;
+    const start = sc[k + '_start'], end = sc[k + '_end'];
+    return {
+        start: (start && start.length === 5) ? start : null,
+        end: (end && end.length === 5) ? end : null,
+        days: (typeof sc[k + '_days'] === 'number') ? sc[k + '_days'] : null,
+        rise: sc[k + '_sunrise_act'] || null,
+        set: sc[k + '_sunset_act'] || null
+    };
+}
+function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
 let lastToggleTime = 0;
 const daysName = ["Pt","Sa","Ça","Pe","Cu","Ct","Pz"];
 
@@ -673,6 +691,7 @@ function applyStatusPayload(d) {
     STATUS = d.devices || {};
     CURRENT_WEATHER = d.weather || {};
     WEATHER_CONFIG = d.weather_config || {};
+    SCHEDULE = d.schedule || {};
     if (d.fw) document.getElementById("fwver").textContent = "v" + d.fw;
     return d;
 }
@@ -931,22 +950,15 @@ function applyDomUpdates() {
                         btn.className = "btn " + (state === "ON" ? "on" : "off");
                         btn.disabled = false;
                     }
-                    // Zamanlayıcı Bilgisi
-                    const active = s[`sched_active_r${r}`] === "true";
-                    const start = s[`sched_start_r${r}`];
-                    if(prog) {
-                        prog.innerText = active ? `🕒 ${start} - ${s[`sched_end_r${r}`]}` : "";
-                    }
                 }
 
-let sunInfo = "";
-const sr = localStorage.getItem(`sun_${dev.name}_r${r}_rise`);
-const ss = localStorage.getItem(`sun_${dev.name}_r${r}_set`);
-
-if(sr && sr !== "0") sunInfo += `☀️${sr} `;
-if(ss && ss !== "0") sunInfo += `🌙${ss}`;
-
-if(prog && sunInfo) prog.innerText += " " + sunInfo;
+                // Zamanlayici ozeti - HUB'daki kayittan (her telefonda ayni)
+                const sc = schedFor(dev.name, r);
+                let info = "";
+                if (sc.days > 0 && sc.start && sc.end) info = `🕒 ${sc.start} - ${sc.end}`;
+                if (sc.rise === "ON" || sc.rise === "OFF") info += ` ☀️${sc.rise === "ON" ? "AÇ" : "KAPAT"}`;
+                if (sc.set === "ON" || sc.set === "OFF") info += ` 🌙${sc.set === "ON" ? "AÇ" : "KAPAT"}`;
+                if (prog) prog.innerText = info.trim();
 
             }
         });
@@ -1092,20 +1104,21 @@ localStorage.removeItem(`sun_${dev.name}_r${r}_set`);
 function loadProgValues(i) {
     const dev = DEVICES[i];
     const r = getRelay(i);
-    const s = localStorage.getItem(`p_${dev.name}_r${r}_s`);
-    const e = localStorage.getItem(`p_${dev.name}_r${r}_e`);
-    const m = localStorage.getItem(`p_${dev.name}_r${r}_m`);
-const sr = localStorage.getItem(`sun_${dev.name}_r${r}_rise`) || "0";
-const ss = localStorage.getItem(`sun_${dev.name}_r${r}_set`)  || "0";
+    // Once HUB'daki kayit; yoksa (hic kaydedilmemis) bu tarayicinin eski kaydi
+    const sc = schedFor(dev.name, r);
+    const s = sc.start || localStorage.getItem(`p_${dev.name}_r${r}_s`);
+    const e = sc.end || localStorage.getItem(`p_${dev.name}_r${r}_e`);
+    const m = sc.days !== null ? String(sc.days) : localStorage.getItem(`p_${dev.name}_r${r}_m`);
+    const sr = sc.rise || localStorage.getItem(`sun_${dev.name}_r${r}_rise`) || "0";
+    const ss = sc.set || localStorage.getItem(`sun_${dev.name}_r${r}_set`) || "0";
 
-document.getElementById(`sunrise_act_${i}`).value = sr;
-document.getElementById(`sunset_act_${i}`).value  = ss;
-
+    document.getElementById(`sunrise_act_${i}`).value = sr;
+    document.getElementById(`sunset_act_${i}`).value  = ss;
 
     document.getElementById(`t1_${i}`).value = s || "08:00";
     document.getElementById(`t2_${i}`).value = e || "18:00";
-    
-    const mask = m ? parseInt(m) : 127; // Varsayılan: tüm günler
+
+    const mask = m !== null ? parseInt(m) : 127; // Varsayılan: tüm günler
     for(let j = 0; j < 7; j++) {
         document.getElementById(`d${i}_${j}`).checked = (mask & (1 << j)) !== 0;
     }
@@ -1511,41 +1524,26 @@ function renderWeather() {
             }
         }
         
-        // Bulut Skoru
+        // Gercek isik seviyesi (gunes isinimi, W/m2) - bulut yuzdesi tahmini yerine
         let scoreInfo = "";
-        if (w.lightness_score && w.lightness_score > 0) {
-            const score = w.lightness_score;
-            let scoreText = "";
-            let scoreColor = "";
-            
-            switch(score) {
-                case 1:
-                    scoreText = "AÇIK HAVA (Bulut ≤%25)";
-                    scoreColor = "#4CAF50";
-                    break;
-                case 2:
-                    scoreText = "PARÇALI BULUTLU (%25-95)";
-                    scoreColor = "#FF9800";
-                    break;
-                case 3:
-                    scoreText = "KAPALI/GECE (%95+)";
-                    scoreColor = "#2196F3";
-                    break;
-                default:
-                    scoreText = `SKOR: ${score}`;
-                    scoreColor = "#9C27B0";
-            }
-            
+        // Aydinlik %: %100 = acik ogle (~700 W/m2). HUB esigi W/m2 olarak tutar.
+        const LIGHT_REF = 7;  // 1% = 7 W/m2
+        const rad = (typeof w.radiation === 'number' && w.radiation >= 0) ? Math.round(w.radiation) : null;
+        const lt = c.light_threshold || 60;
+        const ltPct = Math.max(1, Math.round(lt / LIGHT_REF));
+        const radPct = rad !== null ? Math.min(100, Math.round(rad / LIGHT_REF)) : null;
+        if (rad !== null) {
+            const dark = rad < lt, bright = rad > lt * 1.3;
+            const st = dark ? ['KARANLIK — otomasyon lambayı yakar', '#2196F3']
+                     : bright ? ['AYDINLIK — otomasyonun yaktığı lamba söner', '#4CAF50']
+                     : ['ARADA — mevcut durum korunur', '#FF9800'];
             scoreInfo = `
-            <div style="background:#1a1a1a;padding:15px;border-radius:8px;margin-bottom:20px;border-left:5px solid ${scoreColor}">
-                <div style="font-size:1.2em;font-weight:bold;color:${scoreColor};margin-bottom:5px">
-                    🎯 BULUT SKORU: ${score}
-                </div>
-                <div style="font-size:0.9em;color:#ccc;font-weight:500">
-                    ${scoreText}
-                </div>
+            <div style="background:#1a1a1a;padding:15px;border-radius:8px;margin-bottom:20px;border-left:5px solid ${st[1]}">
+                <div style="font-size:1.2em;font-weight:bold;color:${st[1]};margin-bottom:5px">☀️ AYDINLIK: %${radPct} <small style="color:#888;font-weight:normal">(${rad} W/m²)</small></div>
+                <div style="font-size:0.9em;color:#ccc;font-weight:500">${st[0]}</div>
                 <div style="font-size:0.8em;color:#888;margin-top:8px">
-                    ${c.threshold ? `📏 Eşik Değer: ${c.threshold}` : ''}
+                    Yanar: %${ltPct} altı · Söner: %${Math.round(ltPct * 1.3)} üstü<br>
+                    Kıyas: açık öğle %100 · kapalı/yağmurlu %7-20 · alacakaranlık %3 altı
                 </div>
             </div>`;
         }
@@ -1586,7 +1584,7 @@ function renderWeather() {
                 <tr><td>Cihaz:</td><td><select id="w_dev">${(c.device_name && !DEVICES.some(d=>d.name===c.device_name)) ? `<option value="${c.device_name}" selected>⚠ ${c.device_name} (listede yok - otomasyon çalışmaz)</option>` : ''}${DEVICES.map(d=>`<option value="${d.name}" ${c.device_name===d.name?'selected':''}>${d.name}</option>`).join('')}</select></td></tr>
                 <tr><td>Röle:</td><td><select id="w_rel"><option value="1" ${c.relay_id==1?'selected':''}>Röle 1</option><option value="2" ${c.relay_id==2?'selected':''}>Röle 2</option></select></td></tr>
                 <tr><td>İşlem:</td><td><select id="w_act"><option value="ON" ${c.action=='ON'?'selected':''}>AÇ</option><option value="OFF" ${c.action=='OFF'?'selected':''}>KAPAT</option></select></td></tr>
-                <tr><td>Eşik:</td><td><select id="w_thr"><option value="1" ${c.threshold==1?'selected':''}>1-Az Bulutlu</option><option value="2" ${c.threshold==2?'selected':''}>2-Parçalı</option><option value="3" ${c.threshold==3?'selected':''}>3-Kapalı/Gece</option></select></td></tr>
+                <tr><td>Aydınlık eşiği (%):</td><td><input type="number" min="1" max="100" step="1" id="w_light" value="${ltPct}"> <small style="color:#888">şu an: %${radPct ?? '-'} · altına düşünce yanar</small></td></tr>
                 <tr><td>Rüzgar Eşiği (Km/s):</td><td><input type="number" step="0.1" id="w_wind_threshold" placeholder="15.0" value="${c.wind_threshold||'15.0'}"></td></tr>
                 <tr><td>Şehir:</td><td><input type="text" id="w_city" placeholder="İstanbul" value="${c.city||''}"></td></tr>
                 <tr><td>İlçe:</td><td><input type="text" id="w_district" placeholder="Kadıköy" value="${c.district||''}"></td></tr>
@@ -1615,7 +1613,8 @@ function saveWeather() {
         active: document.getElementById('w_active').checked,
         device_name: document.getElementById('w_dev').value,
         relay_id: parseInt(document.getElementById('w_rel').value),
-        threshold: parseInt(document.getElementById('w_thr').value),
+        threshold: WEATHER_CONFIG.threshold || 3,  // isinim verisi yoksa yedek (eski bulut skoru)
+        light_threshold: Math.round((parseInt(document.getElementById('w_light').value) || 9) * 7),  // % -> W/m2
         action: document.getElementById('w_act').value,
         wind_threshold: parseFloat(document.getElementById('w_wind_threshold').value),
         city: document.getElementById('w_city').value.trim(),
@@ -1692,6 +1691,32 @@ function refreshWeather() {
     });
 }
 
+// --- OLAY KAYDI ---
+const EVENT_SRC = {
+    zaman: '⏰ Zamanlayıcı', mqtt: '📱 MQTT', web: '🖥️ Web', http: '🔗 HTTP',
+    gunbatimi: '🌇 Günbatımı', gundogumu: '🌅 Gündoğumu',
+    bulut: '🌥️ Karanlık', 'bulut-geri': '☀️ Aydınlandı'
+};
+function renderEvents() {
+    fetch('/events').then(r => r.json()).then(list => {
+        if (location.pathname !== '/log') return;
+        let html = `<div class="settings-container"><h3>📋 Olay Kaydı</h3>
+            <small style="color:#888">Son 50 röle olayı, en yeni üstte. HUB yeniden başlayınca sıfırlanır.</small>`;
+        if (!list.length) {
+            html += `<p style="color:#888;margin-top:15px">Henüz olay yok.</p>`;
+        } else {
+            html += `<table style="margin-top:10px;font-size:0.85em"><tr><th align="left">Zaman</th><th align="left">Lamba</th><th>İşlem</th><th align="left">Kaynak</th></tr>` +
+                list.map(e => `<tr>
+                    <td style="white-space:nowrap">${escHtml(e.t)}</td>
+                    <td>${escHtml(e.dev)} <small style="color:#888">R${e.relay}</small></td>
+                    <td align="center" style="color:${e.on ? '#FF9800' : '#03dac6'};font-weight:bold">${e.on ? 'AÇ' : 'KAPAT'}${e.ok ? '' : ' <span style="color:#cf6679" title="Cihaza ulaşılamadı">✗</span>'}</td>
+                    <td>${escHtml(EVENT_SRC[e.src] || e.src)}</td></tr>`).join('') + `</table>`;
+        }
+        html += `</div>`;
+        document.getElementById("content").innerHTML = html;
+    }).catch(() => {});
+}
+
 // --- NAVİGASYON ---
 function navigate() {
     const p = location.pathname;
@@ -1701,10 +1726,13 @@ function navigate() {
     if(p === "/") document.getElementById("nav1").className = "active";
     else if(p === "/settings") document.getElementById("nav2").className = "active";
     else if(p === "/weather") document.getElementById("nav3").className = "active";
+    else if(p === "/log") document.getElementById("nav4").className = "active";
 
     // İlgili sayfayı render et
     if(p === "/settings") {
         fetchDevices().then(renderSettings);
+    } else if(p === "/log") {
+        renderEvents();
     } else if(p === "/weather") {
         fetchDevices().then(renderWeather);
     } else {
@@ -1723,6 +1751,7 @@ window.onload = function() {
     // Artık asıl güncellemeler WS push ile geliyor - bu sadece WS
     // koparsa (ev ağı kararsız olabilir) diye yedek/geç bir fallback.
     setInterval(update, 15000);
+    setInterval(() => { if (location.pathname === '/log') renderEvents(); }, 10000);
 };
 </script>
 </body>

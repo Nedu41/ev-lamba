@@ -10,3 +10,4 @@ void startDisplayTask();
 
 // AA dunya RSS -> NEWS_TICKER_TEXT (blocking HTTPS, hava gorevinden cagrilir)
 bool fetchNews();
+String newsStatus();  // son haber cekme sonucu (uzaktan teshis)

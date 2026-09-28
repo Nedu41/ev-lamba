@@ -55,8 +55,8 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
   // forecast_days=1: sadece bugunun o anki saati kullaniliyor. Eskiden 7 gun
   // (168 saat x 4 alan) isteniyordu - ekran sprite'lari heap'i azaltinca
   // deserializeJson "NoMemory" ile basarisiz oldu (2026-09-27 seri log).
-  // Saatlik ruzgar alanlari da kaldirildi: ruzgar current_weather'dan geliyor.
-  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&hourly=cloudcover,relativehumidity_2m" + "&daily=sunrise,sunset" + "&current_weather=true&timezone=auto&forecast_days=1&models=ecmwf_ifs025";
+  // Saatlik ruzgar alanlari da kaldirildi: ruzgar current blogundan geliyor.
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&hourly=cloudcover,relativehumidity_2m" + "&daily=sunrise,sunset" + "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day,shortwave_radiation&timezone=auto&forecast_days=1&models=ecmwf_ifs025";
 
   Serial.printf("DEBUG: Open-Meteo URL: %s\n", url.c_str());
 
@@ -86,15 +86,17 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
     return false;
   }
 
-  // current_weather bölümünü debug et
-  if (scratch.containsKey("current_weather")) {
-    JsonObject cw = scratch["current_weather"].as<JsonObject>();
-    float temp = cw["temperature"] | 0.0f;
-    float windSpeed = cw["windspeed"] | 0.0f;
-    int windDir = cw["winddirection"] | 0;
-    int weathercode = cw["weathercode"] | 0;
+  // Anlik degerler: yeni "current" blogu. (Eski current_weather=true ile
+  // birlikte istenirse Open-Meteo current= parametresini yok sayiyor - isinim
+  // hic gelmiyordu, 2026-09-28 dogrulandi.)
+  if (scratch["current"].is<JsonObject>()) {
+    JsonObject cw = scratch["current"].as<JsonObject>();
+    float temp = cw["temperature_2m"] | 0.0f;
+    float windSpeed = cw["wind_speed_10m"] | 0.0f;
+    int windDir = cw["wind_direction_10m"] | 0;
+    int weathercode = cw["weather_code"] | 0;
 
-    Serial.printf("DEBUG: current_weather -> temp: %.1f, wind_speed: %.1f, wind_dir: %d, weathercode: %d\n",
+    Serial.printf("DEBUG: current -> temp: %.1f, wind_speed: %.1f, wind_dir: %d, weathercode: %d\n",
                   temp, windSpeed, windDir, weathercode);
 
     out["temp"] = temp;
@@ -102,8 +104,11 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
     out["wind_dir"] = windDir;
     out["weathercode"] = weathercode;
     out["is_day"] = cw["is_day"] | 1;  // ekran: gunes/ay, gunduz/gece gokyuzu
+    // Gercek isik: yere ulasan gunes isinimi (W/m2). Bulut yuzdesinden tahmin
+    // etmek yerine bulut otomasyonu bununla karar verir (-1: veri yok).
+    out["radiation"] = cw["shortwave_radiation"] | -1.0f;
   } else {
-    Serial.println("DEBUG: current_weather anahtarı yok!");
+    Serial.println("DEBUG: current anahtarı yok!");
     out["temp"] = 0.0f;
     out["wind_speed"] = 0.0f;
     out["wind_dir"] = 0.0f;
@@ -270,6 +275,7 @@ void updateWeatherFromConfig() {
     CURRENT_WEATHER_DOC["lightness_score"] = lightnessScore;
     CURRENT_WEATHER_DOC["weathercode"] = weathercode;   // WMO kodu - ekran animasyonu
     CURRENT_WEATHER_DOC["is_day"] = out["is_day"] | 1;
+    CURRENT_WEATHER_DOC["radiation"] = out["radiation"] | -1.0f;
 
     Serial.printf("DEBUG: Hava durumu güncellendi - Şehir: %s, Sıcaklık: %.1f°C, Rüzgar: %.1f Km/s, Skor: %d\n",
                   CURRENT_WEATHER_DOC["city_name"].as<String>().c_str(),

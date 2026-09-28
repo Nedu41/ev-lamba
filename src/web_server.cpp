@@ -9,6 +9,8 @@
 #include "devices.h"
 #include "weather.h"
 #include "telegram.h"
+#include "events.h"
+#include "display.h"
 #include "relay_webpage_multi.h"
 
 AsyncWebServer server(80);
@@ -50,6 +52,7 @@ String buildStatusPayload() {
   StaticJsonDocument<4096> responseDoc;
   responseDoc["type"] = "status";
   responseDoc["fw"] = FW_VERSION;
+  responseDoc["news"] = newsStatus();
 
   // Cihaz durumlarını olduğu gibi gönder
   if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
@@ -310,12 +313,13 @@ void applyWeatherConfig(AsyncWebServerRequest *request, const String& body) {
     // Diğer ayar değişim kontrolü
     // NOT: sol taraf da "| varsayilan" ile okunuyor - ArduinoJson v7'de ham
     // MemberProxy'yi cast'siz != ile karsilastirmak private kopya ctor hatasi veriyordu.
-    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || (inDoc["device_name"] | "") != (WEATHER_CONFIG_DOC["device_name"] | "") || (inDoc["relay_id"] | 0) != (WEATHER_CONFIG_DOC["relay_id"] | 0) || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["start_time"] | "") != (WEATHER_CONFIG_DOC["start_time"] | "") || (inDoc["end_time"] | "") != (WEATHER_CONFIG_DOC["end_time"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f)) {  // Rüzgar eşiği kontrolü eklendi
+    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || (inDoc["device_name"] | "") != (WEATHER_CONFIG_DOC["device_name"] | "") || (inDoc["relay_id"] | 0) != (WEATHER_CONFIG_DOC["relay_id"] | 0) || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["start_time"] | "") != (WEATHER_CONFIG_DOC["start_time"] | "") || (inDoc["end_time"] | "") != (WEATHER_CONFIG_DOC["end_time"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f) || (inDoc["light_threshold"] | 60) != (WEATHER_CONFIG_DOC["light_threshold"] | 60)) {
       configChanged = true;
       WEATHER_CONFIG_DOC["active"] = inDoc["active"];
       WEATHER_CONFIG_DOC["device_name"] = inDoc["device_name"];
       WEATHER_CONFIG_DOC["relay_id"] = inDoc["relay_id"];
       WEATHER_CONFIG_DOC["threshold"] = inDoc["threshold"];
+      WEATHER_CONFIG_DOC["light_threshold"] = inDoc["light_threshold"] | 60;
       WEATHER_CONFIG_DOC["action"] = inDoc["action"];
       WEATHER_CONFIG_DOC["start_time"] = inDoc["start_time"];
       WEATHER_CONFIG_DOC["end_time"] = inDoc["end_time"];
@@ -467,7 +471,12 @@ void proxyWorkerTask(void *pvParameters) {
       String action = job.action;
       if (ip.length() >= 7 && job.relay >= 1 && job.relay <= MAX_RELAYS &&
           (action == "on" || action == "off")) {
-        ok = sendControlSignal(ip, job.relay, action);
+        ok = sendControlSignal(ip, job.relay, action, "web");
+        String devName = ip;
+        for (JsonObject d : doc.as<JsonArray>()) {
+          if ((d["ip"] | String("")) == ip) { devName = d["name"] | ip; break; }
+        }
+        addEvent(devName, job.relay, action == "on", "web", ok);
       }
 
       StaticJsonDocument<192> out;
@@ -552,6 +561,10 @@ void setupWebServer() {
   server.on("/", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/settings", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/weather", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/log", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/events", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", eventsJson());
+  });
   server.on("/fetch_status", AsyncWebRequestMethod::HTTP_GET, handleStatusFetch);
   server.on("/proxy", AsyncWebRequestMethod::HTTP_GET, handleProxy);
   server.on("/get_devices", AsyncWebRequestMethod::HTTP_GET, handleGetDevices);

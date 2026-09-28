@@ -7,22 +7,21 @@
 #include "app_state.h"
 
 TFT_eSPI tft = TFT_eSPI();
-TFT_eSprite ticker = TFT_eSprite(&tft);
 TFT_eSprite scene = TFT_eSprite(&tft);   // canli hava arka plani (4-bit paletli)
+TFT_eSprite ticker = TFT_eSprite(&tft);  // haber kayan yazisi (tam genislik, etiketsiz)
 
 // ============== Yerlesim (320x240, rotation 1) ==============
 // y 0..29   : ust serit (konum, surum, saat)      - dogrudan tft
-// y 30..213 : hava sahnesi + paneller            - scene sprite
-// y 214..239: haber kayan yazisi                  - ticker sprite
+// y 30..213 : hava sahnesi + paneller              - scene sprite
+// y 214..239: haber kayan yazisi (tam genislik)     - ticker sprite
 const int HEADER_H = 30;
-const int TICKER_Y = 214;
-const int TICKER_TAG_W = 62;
-const int TICKER_W = 320 - TICKER_TAG_W;
 const int TICKER_H = 26;
+const int TICKER_Y = 240 - TICKER_H;
+const int TICKER_W = 320;
+const float TICKER_SPEED = 60.0f;  // px/sn
 const int SCENE_Y = HEADER_H;
 const int SCENE_W = 320;
-const int SCENE_H = TICKER_Y - HEADER_H;   // 184
-const float TICKER_SPEED = 60.0f;         // px/sn
+const int SCENE_H = TICKER_Y - HEADER_H;
 
 // Palet: koyu zemin + camgobegi/turuncu vurgu (web arayuzuyle ayni tonlar)
 #define COL_HEADER  0x18C3  // ~#1C1C1C
@@ -618,15 +617,7 @@ static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   frameNo++;
 }
 
-// ============== Haber kayan yazisi ==============
-void drawTickerTag() {
-  tft.fillRect(0, TICKER_Y, TICKER_TAG_W, TICKER_H, COL_ORANGE);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(TFT_BLACK, COL_ORANGE);
-  tft.drawString("HABER", TICKER_TAG_W / 2, TICKER_Y + TICKER_H / 2, 2);
-  tft.setTextDatum(TL_DATUM);
-}
-
+// ============== Haber kayan yazisi (tam genislik, etiketsiz) ==============
 int tickerCharWidth(char c) {
   char b[2] = {c, 0};
   return ticker.textWidth(b, 2);
@@ -660,55 +651,87 @@ static void tickerStep(float dt) {
 
   ticker.fillSprite(COL_HEADER);
   ticker.setTextColor(TFT_WHITE, COL_HEADER);
-  ticker.drawString(tickerText.substring(tickerStart, tickerStart + 70), (int)tickerX, 5, 2);
-  ticker.pushSprite(TICKER_TAG_W, TICKER_Y);
+  ticker.drawString(tickerText.substring(tickerStart, tickerStart + 90), (int)tickerX, 5, 2);
+  ticker.pushSprite(0, TICKER_Y);
 }
 
 // ============== Haber (AA dunya RSS) ==============
+// USB takmadan uzaktan teshis: /fetch_status "news" alaninda gorunur
+static String newsState = "henuz denenmedi";
+String newsStatus() { return newsState; }
+
+static void setNewsState(const String& s) {
+  newsState = s;
+  Serial.println("[Haber] " + s);
+}
+
+// BUGFIX: eskiden tum RSS (dun 15KB, bugun 21.7KB) getString() ile tek parca
+// bellege aliniyordu. Ekran sprite'lari + TLS'den sonra o buyuklukte blok
+// kalmayinca yanit bos geliyor, kod da LOG YAZMADAN vazgeciyordu ("Haberler
+// yukleniyor" takili kaliyordu). Simdi akis halinde okunup ilk NEWS_MAX_ITEMS
+// baslik bulununca baglanti kesiliyor (~1KB bellek).
 bool fetchNews() {
-  if (WiFi.status() != WL_CONNECTED) return false;
+  if (WiFi.status() != WL_CONNECTED) { setNewsState("WiFi yok"); return false; }
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
   http.setTimeout(5000);
-  if (!http.begin(client, NEWS_RSS_URL)) return false;
-  http.addHeader("User-Agent", "MerkeziHUB/1.0");
+  http.useHTTP10(true);  // chunked kodlama olmasin - ham akista parca boyutlari araya girmesin
+  http.setUserAgent("MerkeziHUB/1.0");  // addHeader("User-Agent") ESP32'de yok sayiliyor
+  if (!http.begin(client, NEWS_RSS_URL)) { setNewsState("begin basarisiz"); return false; }
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    Serial.printf("[Haber] HTTP %d\n", code);
+    setNewsState("HTTP " + String(code) + (code < 0 ? " " + http.errorToString(code) : ""));
     http.end();
     return false;
   }
-  String xml = http.getString();
+
+  WiFiClient* s = http.getStreamPtr();
+  String text, title, win;
+  bool inItem = false, inTitle = false;
+  int count = 0;
+  unsigned long deadline = millis() + 8000;
+  while (count < NEWS_MAX_ITEMS && millis() < deadline && (s->connected() || s->available())) {
+    if (!s->available()) { delay(5); continue; }
+    char ch = (char)s->read();
+    if (inTitle) {
+      title += ch;
+      if (title.endsWith("</title>")) {
+        title.remove(title.length() - 8);
+        title.replace("<![CDATA[", "");
+        title.replace("]]>", "");
+        title = trAscii(decodeEntities(title));
+        title.trim();
+        if (title.length()) {
+          if (text.length()) text += "     +++     ";
+          text += title;
+          count++;
+        }
+        inTitle = false;
+        inItem = false;  // haber basina sadece ilk <title>
+        title = "";
+      } else if (title.length() > 400) {  // bozuk/beklenmedik icerik
+        inTitle = false;
+        title = "";
+      }
+      continue;
+    }
+    win += ch;
+    if (win.length() > 8) win.remove(0, win.length() - 8);
+    if (!inItem && win.endsWith("<item>")) inItem = true;
+    else if (inItem && win.endsWith("<title>")) { inTitle = true; title = ""; }
+  }
   http.end();
 
-  String text;
-  int count = 0, pos = 0;
-  while (count < NEWS_MAX_ITEMS) {
-    int item = xml.indexOf("<item>", pos);
-    if (item < 0) break;
-    int t1 = xml.indexOf("<title>", item);
-    int t2 = (t1 < 0) ? -1 : xml.indexOf("</title>", t1);
-    if (t2 < 0) break;
-    String title = xml.substring(t1 + 7, t2);
-    title.replace("<![CDATA[", "");
-    title.replace("]]>", "");
-    title = trAscii(decodeEntities(title));
-    title.trim();
-    if (title.length()) {
-      if (text.length()) text += "     +++     ";
-      text += title;
-      count++;
-    }
-    pos = t2;
-  }
-  if (!count) return false;
-
+  if (!count) { setNewsState("baslik bulunamadi (bos heap " + String(ESP.getFreeHeap()) + ")"); return false; }
   if (xSemaphoreTake(newsMutex, MUTEX_TIMEOUT) == pdTRUE) {
     NEWS_TICKER_TEXT = text;
     xSemaphoreGive(newsMutex);
   }
-  Serial.printf("[Haber] %d baslik alindi\n", count);
+  struct tm t;
+  char ts[6] = "--:--";
+  if (getLocalTime(&t, 0)) strftime(ts, sizeof(ts), "%H:%M", &t);
+  setNewsState("OK " + String(count) + " baslik " + ts);
   return true;
 }
 
@@ -727,7 +750,6 @@ void displayTask(void* pvParameters) {
   if (animated) setFixedPalette();
 
   tft.fillScreen(TFT_BLACK);
-  drawTickerTag();
   readWeather();
   drawHeader();
 
@@ -756,6 +778,31 @@ void displayTask(void* pvParameters) {
       }
     }
     drawClock(false);
+
+    // Haber (HTTPS/TLS). BUGFIX (2026-09-28): TLS handshake tek parca ~35-45KB
+    // bellek istiyor; sahne+ticker sprite'lari acikken en buyuk bos blok bunun
+    // altina dustugu icin surekli "start_ssl_client: -32512" (bellek yetersiz)
+    // ile basarisiz oluyordu - haber SONSUZA dek "yukleniyor" gorunuyordu.
+    // Sprite'lar sadece bu task'a ait, o yuzden TLS sirasinda GUVENLE gecici
+    // silinip sonra geri kurulabiliyor (baska task erismiyor).
+    {
+      static unsigned long lastNewsUpdate = 0;
+      static bool newsOk = false, firstNewsRun = true;
+      unsigned long newsInterval = newsOk ? NEWS_UPDATE_INTERVAL : 120000UL;
+      if (firstNewsRun || now - lastNewsUpdate >= newsInterval) {
+        firstNewsRun = false;
+        lastNewsUpdate = now;
+        if (animated) scene.deleteSprite();
+        ticker.deleteSprite();
+        newsOk = fetchNews();
+        ticker.createSprite(TICKER_W, TICKER_H);
+        scene.setColorDepth(4);
+        animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
+        if (animated) { setFixedPalette(); cur = SC_NONE; }  // palet sifirlandi, yeniden kur
+        drawHeader();
+        weatherDisplayDirty = true;  // animated durumu degismis olabilir - guvenli tam yeniden cizim
+      }
+    }
 
     if (animated) {
       Scene sc = wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
