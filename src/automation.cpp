@@ -220,26 +220,15 @@ void windAlertLogic() {
 }
 
 void updateWeatherAndControlTask(void* pvParameters) {
-  unsigned long lastWeatherUpdate = 0;
-  const unsigned long WEATHER_UPDATE_INTERVAL = 600000;  // 10 dakika
-  bool firstRun = true;
-
+  // NOT (2026-09-28): hava durumu cekme (updateWeatherFromConfig, HTTPS/TLS)
+  // ve haber cekme artik displayTask icinde - TLS'in istedigi tek parca
+  // buyuk bellegi ekran sprite'larini gecici silip acmak icin sprite'larin
+  // SAHIBI olan task'ta yapilmasi gerekiyor (bkz. display.cpp). Bu gorev
+  // (baska task'ta calisan) daha once CURRENT_WEATHER_DOC'u hic guncelleyemiyordu
+  // - "SSL - Memory allocation failed" ile hep basarisiz oluyordu, canli
+  // log ile dogrulandi (2026-09-28: weather=FETCH_ERROR, otomasyon hicbir
+  // zaman karar veremiyordu).
   while (1) {
-    unsigned long currentTime = millis();
-
-    if (firstRun || weatherRefreshRequested || currentTime - lastWeatherUpdate >= WEATHER_UPDATE_INTERVAL) {
-      Serial.println("DEBUG: Hava durumu güncelleme tetiklendi...");
-      weatherRefreshRequested = false;
-      forceNtpSync();
-      updateWeatherFromConfig();
-      lastWeatherUpdate = currentTime;
-    }
-    // NOT: haber cekme (fetchNews) artik displayTask icinde - TLS'in istedigi
-    // tek parca buyuk bellegi ekran sprite'larini gecici silip acmak icin
-    // sprite'larin SAHIBI olan task'ta yapilmasi gerekiyor (bkz. display.cpp)
-
-    firstRun = false;
-
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0)) {  // non-blocking check
       weatherControlLogic(timeinfo.tm_hour * 60 + timeinfo.tm_min);
@@ -254,9 +243,12 @@ void updateWeatherAndControlTask(void* pvParameters) {
     // en geç 60sn'de bir güncel veri gitsin
     wsBroadcastStatus();
 
-    // Hava durumu ve kontrol döngüsü 1 dakikada bir kontrol edilsin -
-    // ama web'den yenileme istenirse (konum degisti / Guncelle butonu) beklemeden
-    for (int i = 0; i < 60 && !weatherRefreshRequested; i++) {
+    // Hava durumu ve kontrol döngüsü 1 dakikada bir kontrol edilsin.
+    // NOT: weatherRefreshRequested artik displayTask tarafindan (5-25ms
+    // dongusunde) cok daha hizli yakalanip tuketiliyor - burada ayrica
+    // beklemeyi kesmeye gerek yok (bayrak displayTask sifirlayana kadar
+    // burasi da beklemeden donup gereksiz CPU harcardi).
+    for (int i = 0; i < 60; i++) {
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
   }

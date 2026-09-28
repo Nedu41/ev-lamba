@@ -4,7 +4,9 @@
 #include <WiFiClientSecure.h>
 #include <TFT_eSPI.h>
 #include <time.h>
+#include <functional>
 #include "app_state.h"
+#include "weather.h"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite scene = TFT_eSprite(&tft);   // canli hava arka plani (4-bit paletli)
@@ -217,19 +219,10 @@ static void labelValue(TFT_eSPI& g, int x, int y, const char* label, const Strin
   g.drawString(value, x + g.textWidth(label, 2) + 6, y, 2);
 }
 
-// "Buzlu cam" hissi: ust kenarda noktali (yarim yogunlukta) parlak cizgi.
-// Gercek alfa-blend yerine bu - 4-bit paletli sahne sprite'inda (16 renk
-// dolu) rastgele saydamlik degeri karisamayiz, ama palette zaten olan
-// P_WHITE ile dithering ekstra bellek/renk gerektirmeden ayni izlenimi verir.
-static void glassTop(TFT_eSPI& g, int x, int y, int w, const PanelColors& c) {
-  for (int i = 3; i < w - 3; i += 2) g.drawPixel(x + i, y + 1, c.white);
-}
-
 static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Sicaklik (etiket yerine hava aciklamasi: "Kapali", "Yagmurlu"...)
   g.fillRoundRect(6, oy + 6, 150, 80, 7, c.panel);
   g.drawRoundRect(6, oy + 6, 150, 80, 7, c.orange);
-  glassTop(g, 6, oy + 6, 150, c);
   const char* desc = !wv.loaded ? "Bekleniyor..." : !wv.ok ? "Veri alinamadi" : weatherText(wv.code);
   g.setTextColor(wv.loaded && !wv.ok ? c.red : c.white, c.panel);
   g.drawString(fitText(desc, 136, 2), 14, oy + 10, 2);
@@ -248,7 +241,6 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Ruzgar
   g.fillRoundRect(164, oy + 6, 150, 80, 7, c.panel);
   g.drawRoundRect(164, oy + 6, 150, 80, 7, c.cyan);
-  glassTop(g, 164, oy + 6, 150, c);
   g.setTextColor(c.gray, c.panel);
   g.drawString("RUZGAR", 172, oy + 10, 2);
   g.setTextColor(c.cyan, c.panel);
@@ -268,7 +260,6 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Alt bilgi
   g.fillRoundRect(6, oy + 138, 308, 42, 7, c.panel);
   g.drawRoundRect(6, oy + 138, 308, 42, 7, c.gray);
-  glassTop(g, 6, oy + 138, 308, c);
   if (wv.ok) {
     labelValue(g, 14, oy + 142, "Nem", "%" + String(wv.hum), c.white, c);
     labelValue(g, 164, oy + 142, "Bulut", "%" + String(wv.clouds), c.white, c);
@@ -776,6 +767,41 @@ bool fetchNews() {
   return true;
 }
 
+// TLS gerektiren bir islemi (haber, hava durumu, ...) sprite'lari GUVENLE
+// gecici serbest birakip calistirir, sonra geri kurar (bkz. asagidaki not).
+// Sadece bu task sahibi oldugu icin displayTask'in KENDI icinden cagirilan
+// islerde kullanilmali.
+static bool animated = false;
+static Scene cur = SC_NONE;
+
+static bool withTlsSpritesFreed(std::function<bool()> fn, const char* tag, bool* spriteOkOut = nullptr) {
+  bool wasAnimated = animated;
+  if (animated) scene.deleteSprite();
+  ticker.deleteSprite();
+  bool ok = fn();
+  ticker.createSprite(TICKER_W, TICKER_H);
+  scene.setColorDepth(4);
+  // BUGFIX (2026-09-28): TLS'in kendi gecici tahsisleri, bosalttigimiz
+  // bloklari baska gorevlerin (hava/durum) o sirada yaptigi kucuk
+  // tahsislerle bolebiliyor - ilk deneme basarisiz olabiliyor. Digerleri
+  // serbest birakana kadar kisa aralikla birkac kez dene.
+  animated = false;
+  for (int attempt = 0; attempt < 10 && !animated; attempt++) {
+    if (attempt) vTaskDelay(pdMS_TO_TICKS(300));
+    animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
+  }
+  if (animated) { setFixedPalette(); cur = SC_NONE; }  // palet sifirlandi, yeniden kur
+  bool spriteOk = animated || !wasAnimated;  // sadece ACIK'tan KAPALI'ya duserse sorun
+  if (spriteOkOut) *spriteOkOut = spriteOk;
+  if (!spriteOk) {
+    Serial.printf("[Ekran] UYARI: %s sonrasi sahne geri kurulamadi | bos heap %u, en buyuk blok %u\n",
+                  tag, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
+  drawHeader();
+  weatherDisplayDirty = true;  // animated durumu degismis olabilir - guvenli tam yeniden cizim
+  return ok;
+}
+
 // ============== Ekran gorevi (TFT'nin tek sahibi) ==============
 void displayTask(void* pvParameters) {
   // Acilis ekranlarindan kalan setTextSize(2/3) sonraki tum font cizimlerini
@@ -784,7 +810,7 @@ void displayTask(void* pvParameters) {
 
   ticker.createSprite(TICKER_W, TICKER_H);
   scene.setColorDepth(4);
-  bool animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
+  animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
   Serial.printf("[Ekran] canli sahne: %s | bos heap %u, en buyuk blok %u\n",
                 animated ? "ACIK" : "KAPALI (bellek yok, statik ekran)",
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
@@ -794,7 +820,6 @@ void displayTask(void* pvParameters) {
   readWeather();
   drawHeader();
 
-  Scene cur = SC_NONE;
   bool curDay = true;
   uint32_t last = millis();
   float t = 0;
@@ -820,49 +845,36 @@ void displayTask(void* pvParameters) {
     }
     drawClock(false);
 
-    // Haber (HTTPS/TLS). BUGFIX (2026-09-28): TLS handshake tek parca ~35-45KB
-    // bellek istiyor; sahne+ticker sprite'lari acikken en buyuk bos blok bunun
-    // altina dustugu icin surekli "start_ssl_client: -32512" (bellek yetersiz)
-    // ile basarisiz oluyordu - haber SONSUZA dek "yukleniyor" gorunuyordu.
-    // Sprite'lar sadece bu task'a ait, o yuzden TLS sirasinda GUVENLE gecici
-    // silinip sonra geri kurulabiliyor (baska task erismiyor).
+    // Haber (HTTPS/TLS, AA RSS). BUGFIX (2026-09-28): TLS handshake tek parca
+    // ~35-45KB bellek istiyor; sahne+ticker sprite'lari acikken en buyuk bos
+    // blok bunun altina dustugu icin surekli basarisiz oluyordu. Sprite'lar
+    // sadece bu task'a ait, TLS sirasinda guvenle gecici serbest birakiliyor.
     {
       static unsigned long lastNewsUpdate = 0;
-      static bool newsOk = false, spriteOk = true, firstNewsRun = true;
-      unsigned long newsInterval = (newsOk && spriteOk) ? NEWS_UPDATE_INTERVAL : 30000UL;
-      if (firstNewsRun || now - lastNewsUpdate >= newsInterval) {
-        firstNewsRun = false;
+      static bool newsOk = false, spriteOk = true, firstRun = true;
+      unsigned long interval = (newsOk && spriteOk) ? NEWS_UPDATE_INTERVAL : 30000UL;
+      if (firstRun || now - lastNewsUpdate >= interval) {
+        firstRun = false;
         lastNewsUpdate = now;
-        bool wasAnimated = animated;
-        if (animated) scene.deleteSprite();
-        ticker.deleteSprite();
-        newsOk = fetchNews();
-        // Tani: fetchNews HEMEN sonrasi, herhangi bir deneme yapmadan ONCE -
-        // gercek "an" bu. Onceki log 6 deneme+900ms SONRA yazdiriliyordu, o
-        // sirada baska gorevler bellek serbest biraktigi icin yaniltici
-        // (40948 gorunuyordu ama ilk denemeler daha az bulmus olmali).
-        Serial.printf("[Ekran] haber sonrasi (deneme oncesi): bos heap %u, en buyuk blok %u, gerekli %u\n",
-                      ESP.getFreeHeap(), ESP.getMaxAllocHeap(), (unsigned)((SCENE_W * SCENE_H) / 2 + 1));
-        ticker.createSprite(TICKER_W, TICKER_H);
-        scene.setColorDepth(4);
-        // BUGFIX (2026-09-28): TLS'in kendi gecici tahsisleri, bosalttigimiz
-        // bloklari baska gorevlerin (hava/durum) o sirada yaptigi kucuk
-        // tahsislerle bolebiliyor - ilk deneme basarisiz olabiliyor ("gun
-        // animasyonu yok" sikayeti). Digerleri serbest birakana kadar kisa
-        // aralikla birkac kez dene.
-        animated = false;
-        for (int attempt = 0; attempt < 10 && !animated; attempt++) {
-          if (attempt) vTaskDelay(pdMS_TO_TICKS(300));
-          animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
-        }
-        if (animated) { setFixedPalette(); cur = SC_NONE; }  // palet sifirlandi, yeniden kur
-        spriteOk = animated || !wasAnimated;  // sadece ACIK'tan KAPALI'ya duserse sorun
-        if (!spriteOk) {
-          Serial.printf("[Ekran] UYARI: haber sonrasi sahne geri kurulamadi (10 deneme) | bos heap %u, en buyuk blok %u\n",
-                        ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-        }
-        drawHeader();
-        weatherDisplayDirty = true;  // animated durumu degismis olabilir - guvenli tam yeniden cizim
+        newsOk = withTlsSpritesFreed([]() { return fetchNews(); }, "haber", &spriteOk);
+      }
+    }
+
+    // Hava durumu (HTTPS/TLS, Open-Meteo + gerekirse Nominatim geocode).
+    // BUGFIX (2026-09-28): bu istek eskiden ayri bir gorevde (automation.cpp)
+    // yapiliyordu - o gorev ekran sprite'larina erisemedigi icin ayni
+    // "SSL - Memory allocation failed" hatasini hep aliyordu (canli log ile
+    // dogrulandi), otomasyon hicbir zaman guncel hava verisi goremiyordu.
+    {
+      static unsigned long lastWeatherUpdate = 0;
+      static bool spriteOk = true, firstRun = true;
+      const unsigned long WEATHER_UPDATE_INTERVAL = 600000UL;  // 10 dakika
+      unsigned long interval = spriteOk ? WEATHER_UPDATE_INTERVAL : 30000UL;
+      if (firstRun || weatherRefreshRequested || now - lastWeatherUpdate >= interval) {
+        firstRun = false;
+        weatherRefreshRequested = false;
+        lastWeatherUpdate = now;
+        withTlsSpritesFreed([]() { forceNtpSync(); updateWeatherFromConfig(); return true; }, "hava", &spriteOk);
       }
     }
 
