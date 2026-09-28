@@ -10,3 +10,4 @@
 
 # Gizli bilgiler (Telegram token vb.) - secrets.h.example sablon olarak kalir
 include/secrets.h
+**/src/secrets.h

@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <WiFiManager.h>
 #include <ESPAsyncWebServer.h>
+#include <vector>
 #include "app_state.h"
 #include "storage.h"
 #include "devices.h"
@@ -495,31 +496,46 @@ void proxyWorkerTask(void *pvParameters) {
 
       setForceRefresh();  // updateAllDeviceStatuses'i hemen uyandirir -> WS "status" push
     } else if (job.kind == ProxyJob::SCAN) {
-      int n = MDNS.queryService("http", "tcp");
+      // WiFi'de tek multicast sorgu/cevap kolayca kayboluyor (yeni modul ilk
+      // taramada cikmayip ikincide cikiyordu) - 3 tur sorgula, sonuclari birlestir.
+      std::vector<std::pair<IPAddress, String>> found;
+      for (int round = 0; round < 3; round++) {
+        int n = MDNS.queryService("http", "tcp");
+        for (int i = 0; i < n; i++) {
+          IPAddress ip = MDNS.IP(i);
+          bool dup = false;
+          for (auto& f : found) if (f.first == ip) { dup = true; break; }
+          if (!dup) found.push_back({ip, MDNS.hostname(i)});
+        }
+      }
+
       StaticJsonDocument<1536> result;
       result["type"] = "scan_result";
       result["reqId"] = job.reqId;
       JsonArray arr = result.createNestedArray("devices");
 
-      for (int i = 0; i < n; i++) {
-        IPAddress ip = MDNS.IP(i);
-        String hostname = MDNS.hostname(i);
+      for (auto& f : found) {
+        IPAddress ip = f.first;
+        const String& hostname = f.second;
 
         // mDNS'in _http._tcp servisini advertise eden HERKES aday olur
         // (yazici, router vb. olabilir) - gercekten bizim ESP01 dugumumuz mu
-        // diye mevcut /mac endpoint'iyle dogruluyoruz.
-        HTTPClient http;
-        http.setTimeout(500);
-        http.setConnectTimeout(500);
+        // diye mevcut /mac endpoint'iyle dogruluyoruz. Zayif sinyalde ilk
+        // istek gecikebiliyor: 1.5sn sure + bir tekrar.
         String mac = "";
-        if (http.begin("http://" + ip.toString() + "/mac")) {
-          if (http.GET() == 200) {
-            mac = http.getString();
-            mac.trim();
+        for (int attempt = 0; attempt < 2 && !mac.length(); attempt++) {
+          HTTPClient http;
+          http.setTimeout(1500);
+          http.setConnectTimeout(1500);
+          if (http.begin("http://" + ip.toString() + "/mac")) {
+            if (http.GET() == 200) {
+              mac = http.getString();
+              mac.trim();
+            }
+            http.end();
           }
-          http.end();
+          mac = normMac(mac);
         }
-        mac = normMac(mac);
         if (!mac.length()) continue;  // ESP01 /mac formatina uymuyor
 
         // Kayitli cihaz: ayni IP VEYA ayni MAC (IP'si degismis olabilir - durum

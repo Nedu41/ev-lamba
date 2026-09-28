@@ -1438,7 +1438,7 @@ function scanDevices() {
         alert("Bağlantı yok (WS), birkaç saniye sonra tekrar deneyin.");
         return;
     }
-    if (el) el.innerHTML = `<div class="scan-box">⏳ Ağ taranıyor...</div>`;
+    if (el) el.innerHTML = `<div class="scan-box">⏳ Ağ taranıyor (~15 sn)...</div>`;
     ws.send(JSON.stringify({ type: "scan_devices", reqId: wsReqCounter++ }));
 }
 
