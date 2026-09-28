@@ -335,7 +335,13 @@ static void setScenePalette(Scene sc, bool day) {
     case SC_THUNDER: sky = STORM; set3(cl, 95,95,115); set3(cd, 62,62,80); set3(pr, 120,160,225); break;
     default: break;
   }
-  if (!day && sc != SC_CLEAR && sc != SC_PARTLY) { k = 0.45f; kc = 0.6f; }
+  // Gece: her havada gokyuzu siyah (ufka dogru cok hafif lacivert) - gece
+  // oldugu belirgin olsun. Bulutlar siyah uzerinde gri kalir.
+  static const RGB BLACK_NIGHT[4] = {{0,0,0},{0,0,3},{2,3,10},{6,8,20}};
+  if (!day) {
+    sky = BLACK_NIGHT;
+    kc = (sc == SC_CLEAR || sc == SC_PARTLY) ? 1.0f : 0.55f;
+  }
   // Kapali/sisli/ciselemede gok cismi bulutlarin arkasindan soluk gorunur:
   // gunduz solgun gunes, gece ay - gece/gunduz her havada ayirt edilsin
   if (sc != SC_CLEAR && sc != SC_PARTLY) {
@@ -351,6 +357,9 @@ static void setScenePalette(Scene sc, bool day) {
   scene.setPaletteColor(P_CLOUD_D, shade(cd, kc));
   scene.setPaletteColor(P_ACCENT, shade(acc, 1.0f));
   scene.setPaletteColor(P_PRECIP, shade(pr, day ? 1.0f : 0.8f));
+  // P_FLASH sadece firtinada simsek icin; diger sahnelerde (ay gorundugunde)
+  // ayin gri tonu: denizler (maria), kenar kararmasi, golge siniri. Palet 16 renk dolu.
+  scene.setPaletteColor(P_FLASH, sc == SC_THUNDER ? tft.color565(255, 255, 215) : tft.color565(165, 163, 148));
 }
 
 // Animasyon durumu
@@ -361,7 +370,7 @@ static Drop drops[70];
 static int dropCount = 0;
 static Cloud cloudsA[6];
 static int cloudCount = 0;
-static const int STAR_COUNT = 40;
+static const int STAR_COUNT = 60;
 static Star stars[STAR_COUNT];
 static uint32_t frameNo = 0;
 static uint32_t nextStrikeMs = 0, strikeEndMs = 0;
@@ -370,7 +379,7 @@ static int16_t boltX[7], boltY[7];
 // Sahnenin "pencere" bandi: panellerin arasinda serbest kalan orta bolge
 const int WIN_TOP = 86, WIN_BOT = 138, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
 
-static void initScene(Scene sc) {
+static void initScene(Scene sc, bool day) {
   dropCount = 0;
   if (sc == SC_RAIN || sc == SC_THUNDER) dropCount = 70;
   else if (sc == SC_DRIZZLE) dropCount = 40;
@@ -385,6 +394,7 @@ static void initScene(Scene sc) {
   }
 
   cloudCount = (sc == SC_CLEAR) ? 0 : (sc == SC_PARTLY) ? 2 : (sc == SC_FOG) ? 0 : 5;
+  if (!day && sc == SC_CLOUDY) cloudCount = 3;  // gece kapali: ay ve yildizlar sik sik gorunsun
   for (int i = 0; i < cloudCount; i++) {
     Cloud& c = cloudsA[i];
     c.s = (sc == SC_PARTLY) ? frand(0.7f, 0.9f) : frand(0.8f, 1.3f);
@@ -433,17 +443,33 @@ static float moonPhase() {
 }
 
 static void drawMoon(int cx, int cy, float phase) {
-  const int R = 15;
+  const int R = 22;
   float c = cosf(2 * PI * phase);
   float litFrac = (1 - c) / 2;
   bool waxing = phase < 0.5f;  // buyuyen: sagdan aydinlik (kuzey yarimkure)
 
-  if (litFrac > 0.2f) {  // hafif hare
-    scene.drawCircle(cx, cy, R + 3, P_SKY4);
-    scene.drawCircle(cx, cy, R + 5, P_SKY3);
+  // Yumusak hare: aydinlik orana gore, iceride yogun, disarida seyrek
+  // titresimli (dithered) noktalar - duz halka yerine isik dagilmasi gibi
+  if (litFrac > 0.15f) {
+    const int H = R + 7;
+    for (int dy = -H; dy <= H; dy++) {
+      for (int dx = -H; dx <= H; dx++) {
+        int d2 = dx * dx + dy * dy;
+        if (d2 <= (R + 1) * (R + 1) || d2 > H * H) continue;
+        bool inner = d2 <= (R + 4) * (R + 4);
+        if (inner ? ((dx + dy) & 1) == 0 : ((dx & 1) && (dy & 1) && ((dx + dy) & 3) == 0))
+          scene.drawPixel(cx + dx, cy + dy, P_CLOUD_D);
+      }
+    }
   }
-  // Ay denizleri (maria) - yuzeydeki koyu lekeler, merkeze gore (dx, dy, r)
-  static const int8_t MARIA[][3] = {{-5, -5, 4}, {3, -6, 3}, {-2, 2, 5}, {5, 4, 3}, {-7, 6, 2}};
+
+  // Ay denizleri (maria), dolunay fotografindaki yerlerine gore (kuzey yukari).
+  // (dx, dy, r) R=22 icin: Imbrium, Serenitatis, Tranquillitatis, Crisium,
+  // Procellarum (2 parca), Nubium, Fecunditatis, Nectaris, Frigoris
+  static const int8_t MARIA[][3] = {
+    {-7, -8, 6}, {3, -8, 4}, {7, -2, 5}, {15, -6, 3},
+    {-14, 0, 6}, {-11, 7, 5}, {-3, 8, 4}, {12, 4, 3}, {7, 8, 2}, {-2, -16, 2}
+  };
   for (int y = -R; y <= R; y++) {
     float w = sqrtf((float)(R * R - y * y));
     float term = w * c;  // golge siniri (terminator)
@@ -456,9 +482,24 @@ static void drawMoon(int cx, int cy, float phase) {
       if (abs(dy) > m[2]) continue;
       int mw = (int)sqrtf((float)(m[2] * m[2] - dy * dy));
       int a = max(x0, m[0] - mw), b = min(x1, m[0] + mw);
-      if (b > a) scene.drawFastHLine(cx + a, cy + y, b - a, P_GRAY);
+      if (b > a) scene.drawFastHLine(cx + a, cy + y, b - a, P_FLASH);
+    }
+    // Kenar kararmasi + yumusak golge siniri
+    scene.drawPixel(cx + x0, cy + y, P_FLASH);
+    scene.drawPixel(cx + x1 - 1, cy + y, P_FLASH);
+    if (litFrac < 0.97f && x1 - x0 > 3) {
+      scene.drawPixel(waxing ? cx + x0 + 1 : cx + x1 - 2, cy + y, P_FLASH);
     }
   }
+  // Parlak kraterler: Tycho (guney), Copernicus - aydinlik taraftaysa
+  auto crater = [&](int dx, int dy) {
+    float w = sqrtf((float)(R * R - dy * dy));
+    float term = w * c;
+    bool lit = waxing ? (dx >= term && dx < w) : (dx >= -w && dx < -term);
+    if (lit) { scene.drawPixel(cx + dx, cy + dy, P_WHITE); scene.drawPixel(cx + dx + 1, cy + dy, P_WHITE); }
+  };
+  crater(-4, 16);
+  crater(-9, -2);
 }
 
 // Bulutlarin arkasindaki soluk gunes (isinsiz disk)
@@ -557,7 +598,9 @@ static void drawFog(float t) {
 static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   drawSky();
   bool openSky = (sc == SC_CLEAR || sc == SC_PARTLY);
-  if (openSky && !day) drawStars();
+  // Yildizlar: gece yagissiz her havada (kapalida bulutlar gectikce ortulur)
+  bool precip = (sc == SC_RAIN || sc == SC_SNOW || sc == SC_THUNDER || sc == SC_DRIZZLE || sc == SC_FOG);
+  if (!day && !precip) drawStars();
   // Gok cismi bulutlardan ONCE cizilir: bulutlar gecerken onu ortup acar.
   // Yagmur/kar/firtinada yogun bulut - gorunmez.
   if (sc != SC_RAIN && sc != SC_SNOW && sc != SC_THUNDER) {
@@ -720,7 +763,7 @@ void displayTask(void* pvParameters) {
         cur = sc;
         curDay = wv.isDay;
         setScenePalette(cur, curDay);
-        initScene(cur);
+        initScene(cur, curDay);
       }
       renderScene(cur, curDay, dt, t, now);
       drawPanels(scene, 0, SPRITE_COLS);
