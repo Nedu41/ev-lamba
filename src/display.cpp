@@ -300,6 +300,21 @@ static void setFixedPalette() {
   scene.setPaletteColor(P_RED, COL_RED);
 }
 
+// 0 = alacakaranlik yok, 1 = tam kizillik. Gundogumu/gunbatimi saatine (HH:MM,
+// Open-Meteo'dan) ne kadar yakinsak o kadar guclu; pencere disinda soner.
+static float twilightFactor() {
+  if (wv.sunrise.length() != 5 || wv.sunset.length() != 5) return 0;
+  struct tm t;
+  if (!getLocalTime(&t, 0)) return 0;
+  int nowMin = t.tm_hour * 60 + t.tm_min;
+  int sunriseMin = wv.sunrise.substring(0, 2).toInt() * 60 + wv.sunrise.substring(3, 5).toInt();
+  int sunsetMin  = wv.sunset.substring(0, 2).toInt() * 60 + wv.sunset.substring(3, 5).toInt();
+  const int WINDOW = 50;  // dakika, gundogumu/batimindan her iki yonde
+  int d = min(abs(nowMin - sunriseMin), abs(nowMin - sunsetMin));
+  if (d > WINDOW) return 0;
+  return 1.0f - (float)d / WINDOW;
+}
+
 static void setScenePalette(Scene sc, bool day) {
   // gok (ust->alt), acik bulut, koyu bulut, vurgu (gunes/ay/-), yagis
   static const RGB CLEAR_D[4] = {{20,70,160},{40,100,190},{70,135,215},{120,175,230}};
@@ -346,6 +361,18 @@ static void setScenePalette(Scene sc, bool day) {
   if (sc != SC_CLEAR && sc != SC_PARTLY) {
     if (day) set3(acc, 235,225,170);
     else set3(acc, 225,222,195);
+  }
+
+  // Gundogumu/gunbatimi kizilligi: ufka dogru turuncu-kizil, tepede mor-lacivert.
+  // Kalin bulutta sonumlu ama tamamen kaybolmaz (ufuktan hafif sizinti gercekci).
+  RGB dawn[4];
+  float glow = twilightFactor() * (1.0f - constrain(wv.clouds, 0, 100) / 100.0f * 0.6f);
+  if (glow > 0.02f) {
+    static const RGB DUSK[4] = {{45,20,68},{110,42,78},{205,78,58},{255,142,58}};  // ust->ufuk
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 3; j++) dawn[i][j] = (uint8_t)(sky[i][j] * (1 - glow) + DUSK[i][j] * glow);
+    sky = dawn;
+    k = max(k, 1.0f - glow * 0.3f);  // kizillik zaten koyulastiriyor, ustune tam gece karartmasi binmesin
   }
 
   for (int i = 0; i < 4; i++) {
@@ -787,18 +814,33 @@ void displayTask(void* pvParameters) {
     // silinip sonra geri kurulabiliyor (baska task erismiyor).
     {
       static unsigned long lastNewsUpdate = 0;
-      static bool newsOk = false, firstNewsRun = true;
-      unsigned long newsInterval = newsOk ? NEWS_UPDATE_INTERVAL : 120000UL;
+      static bool newsOk = false, spriteOk = true, firstNewsRun = true;
+      unsigned long newsInterval = (newsOk && spriteOk) ? NEWS_UPDATE_INTERVAL : 30000UL;
       if (firstNewsRun || now - lastNewsUpdate >= newsInterval) {
         firstNewsRun = false;
         lastNewsUpdate = now;
+        bool wasAnimated = animated;
         if (animated) scene.deleteSprite();
         ticker.deleteSprite();
         newsOk = fetchNews();
         ticker.createSprite(TICKER_W, TICKER_H);
         scene.setColorDepth(4);
-        animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
+        // BUGFIX (2026-09-28): TLS'in kendi gecici tahsisleri, bosalttigimiz
+        // bloklari baska gorevlerin (hava/durum) o sirada yaptigi kucuk
+        // tahsislerle bolebiliyor - ilk deneme basarisiz olabiliyor ("gun
+        // animasyonu yok" sikayeti). Digerleri serbest birakana kadar kisa
+        // aralikla birkac kez dene.
+        animated = false;
+        for (int attempt = 0; attempt < 6 && !animated; attempt++) {
+          if (attempt) vTaskDelay(pdMS_TO_TICKS(150));
+          animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
+        }
         if (animated) { setFixedPalette(); cur = SC_NONE; }  // palet sifirlandi, yeniden kur
+        spriteOk = animated || !wasAnimated;  // sadece ACIK'tan KAPALI'ya duserse sorun
+        if (!spriteOk) {
+          Serial.printf("[Ekran] UYARI: haber sonrasi sahne geri kurulamadi | bos heap %u, en buyuk blok %u\n",
+                        ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+        }
         drawHeader();
         weatherDisplayDirty = true;  // animated durumu degismis olabilir - guvenli tam yeniden cizim
       }
