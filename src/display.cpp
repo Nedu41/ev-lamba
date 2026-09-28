@@ -628,8 +628,11 @@ static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   bool precip = (sc == SC_RAIN || sc == SC_SNOW || sc == SC_THUNDER || sc == SC_DRIZZLE || sc == SC_FOG);
   if (!day && !precip) drawStars();
   // Gok cismi bulutlardan ONCE cizilir: bulutlar gecerken onu ortup acar.
-  // Yagmur/kar/firtinada yogun bulut - gorunmez.
-  if (sc != SC_RAIN && sc != SC_SNOW && sc != SC_THUNDER) {
+  // BUGFIX: sadece yagmur/kar/firtina haric tutuluyordu - ciseleme (drizzle,
+  // kod 51-57) ve sis de "precip" sayildigi halde disarida kaliyordu, %100
+  // bulutlu ciselemede bile soluk gunes gorunuyordu (2026-09-28 gozlemlendi,
+  // canli kod 55). Simdi TUM yagisli/sisli sahnelerde gok cismi gizli.
+  if (!precip) {
     if (day) {
       if (openSky) drawSun(160, WIN_MID, t);
       else drawDimSun(160, WIN_MID);
@@ -823,6 +826,12 @@ void displayTask(void* pvParameters) {
         if (animated) scene.deleteSprite();
         ticker.deleteSprite();
         newsOk = fetchNews();
+        // Tani: fetchNews HEMEN sonrasi, herhangi bir deneme yapmadan ONCE -
+        // gercek "an" bu. Onceki log 6 deneme+900ms SONRA yazdiriliyordu, o
+        // sirada baska gorevler bellek serbest biraktigi icin yaniltici
+        // (40948 gorunuyordu ama ilk denemeler daha az bulmus olmali).
+        Serial.printf("[Ekran] haber sonrasi (deneme oncesi): bos heap %u, en buyuk blok %u, gerekli %u\n",
+                      ESP.getFreeHeap(), ESP.getMaxAllocHeap(), (unsigned)((SCENE_W * SCENE_H) / 2 + 1));
         ticker.createSprite(TICKER_W, TICKER_H);
         scene.setColorDepth(4);
         // BUGFIX (2026-09-28): TLS'in kendi gecici tahsisleri, bosalttigimiz
@@ -831,14 +840,14 @@ void displayTask(void* pvParameters) {
         // animasyonu yok" sikayeti). Digerleri serbest birakana kadar kisa
         // aralikla birkac kez dene.
         animated = false;
-        for (int attempt = 0; attempt < 6 && !animated; attempt++) {
-          if (attempt) vTaskDelay(pdMS_TO_TICKS(150));
+        for (int attempt = 0; attempt < 10 && !animated; attempt++) {
+          if (attempt) vTaskDelay(pdMS_TO_TICKS(300));
           animated = scene.createSprite(SCENE_W, SCENE_H) != nullptr;
         }
         if (animated) { setFixedPalette(); cur = SC_NONE; }  // palet sifirlandi, yeniden kur
         spriteOk = animated || !wasAnimated;  // sadece ACIK'tan KAPALI'ya duserse sorun
         if (!spriteOk) {
-          Serial.printf("[Ekran] UYARI: haber sonrasi sahne geri kurulamadi | bos heap %u, en buyuk blok %u\n",
+          Serial.printf("[Ekran] UYARI: haber sonrasi sahne geri kurulamadi (10 deneme) | bos heap %u, en buyuk blok %u\n",
                         ESP.getFreeHeap(), ESP.getMaxAllocHeap());
         }
         drawHeader();
