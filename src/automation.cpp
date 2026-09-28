@@ -11,7 +11,7 @@
 // ============== Existing weatherControlLogic ==============
 // DEGISTI: tek cihaz/role yerine COKLU hedef ("targets": [{device,relay},...])
 // - web arayuzunde artik dropdown degil tikli kutular, birden fazla lamba
-// ayni otomasyona baglanabiliyor. Esik/islem tum hedefler icin ortak.
+// ayni otomasyona baglanabiliyor. Her hedefin kendi esigi ("light") ve islemi var.
 void weatherControlLogic(int currentMinute) {
 
   bool weatherActive = WEATHER_CONFIG_DOC["active"] | false;
@@ -46,7 +46,8 @@ void weatherControlLogic(int currentMinute) {
 
   // Hedef listesini mutex ICINDEYKEN yerel diziye kopyala - JsonArray
   // WEATHER_CONFIG_DOC'a bagli referans, mutex disinda kullanmak guvenli degil.
-  struct Target { String device; int relay; };
+  // Her hedefin kendi esigi/islemi var; yoksa genel ayar kullanilir
+  struct Target { String device; int relay; float light; String action; };
   static Target targets[MAX_DEVICES * MAX_RELAYS];
   int targetCount = 0;
   for (JsonObject t : WEATHER_CONFIG_DOC["targets"].as<JsonArray>()) {
@@ -56,6 +57,8 @@ void weatherControlLogic(int currentMinute) {
     if (dev.length() && relay >= 1 && relay <= MAX_RELAYS) {
       targets[targetCount].device = dev;
       targets[targetCount].relay = relay;
+      targets[targetCount].light = t["light"] | lightOn;
+      targets[targetCount].action = t["action"] | action;
       targetCount++;
     }
   }
@@ -76,18 +79,19 @@ void weatherControlLogic(int currentMinute) {
   // disarisi aydinlik olsa bile (olcum: yagmurlu 11:30'da 88 W/m2) lamba yaniyordu.
   // Histerezis: esigin altinda "karanlik", esigin %30 ustunde "aydinlik", arada
   // durum korunur - isik esik civarinda dalgalanirken lamba acip kapanmasin.
-  bool dark, bright;
-  if (radiation >= 0) {
-    dark = radiation < lightOn;
-    bright = radiation > lightOn * 1.3f;
-  } else {
-    dark = lightnessScore >= threshold;
-    bright = !dark;
-  }
-
   for (int ti = 0; ti < targetCount; ti++) {
     const String& deviceName = targets[ti].device;
     int relayId = targets[ti].relay;
+    const String& action = targets[ti].action;
+
+    bool dark, bright;
+    if (radiation >= 0) {
+      dark = radiation < targets[ti].light;
+      bright = radiation > targets[ti].light * 1.3f;
+    } else {
+      dark = lightnessScore >= threshold;
+      bright = !dark;
+    }
 
     int devIdx = -1;
     String ip = "";

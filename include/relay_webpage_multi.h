@@ -585,6 +585,25 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
     }
 }
 
+/* Cihaz kartlari - telefonda tek sutun, genis ekranda yan yana */
+.dev-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.dev-card { background: #1e1e1e; border: 1px solid #333; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dev-card-head { display: flex; align-items: center; gap: 8px; }
+.dev-card-head .compact-input { flex: 1; font-weight: bold; }
+.dev-card-row { display: flex; align-items: center; gap: 8px; font-size: 0.85em; }
+.dev-card-row > span { width: 55px; color: #888; flex-shrink: 0; }
+.dev-card-row > input, .dev-card-row > select { flex: 1; }
+.dev-card-row .mac-box-compact, .dev-card-row .rssi-value-compact { flex: 1; max-width: none; text-align: left; }
+.mini-btn { background: #333; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+.feat-icons { font-size: 0.85em; margin-left: 4px; }
+.devices-container { max-width: 900px; margin: 10px auto; padding: 10px; }
+.devices-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.devices-header-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (min-width: 769px) {
+    .grid { max-width: 1000px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .dev-name { max-width: 150px; }
+}
+
 </style>
 </head>
 <body>
@@ -804,7 +823,8 @@ function renderControl() {
             <div class="card-header">
                 <div style="display:flex;align-items:center">
                     <span class="status-dot" id="dot_${i}"></span>
-                    <span class="dev-name" title="${dev.ip}">${dev.name}</span>
+                    <span class="dev-name" style="cursor:pointer" title="${escHtml(dev.ip)} — ayarlar" onclick="route('/device?i=${i}')">${escHtml(dev.name)}</span>
+                    <span class="feat-icons">${featIcons(dev)}</span>
                 </div>
                 <button class="timer-icon-btn" onclick="openSect(${i})" title="Zamanlayıcı Ayarları">🕒</button>
             </div>
@@ -902,30 +922,16 @@ function applyDomUpdates() {
             if(wifiInfo) {
                 if(online && s.wifi_rssi) {
                     const rssi = s.wifi_rssi;
-                    const quality = s.wifi_quality || 0;
-                    const status = s.wifi_status || "Bilinmiyor";
-                    
+
                     // Sinyal gücüne göre renk belirleme
                     let signalColor = "#cf6679"; // Kırmızı (zayıf)
                     if(rssi >= -50) signalColor = "#4CAF50"; // Yeşil (mükemmel)
                     else if(rssi >= -60) signalColor = "#8BC34A"; // Açık yeşil (çok iyi)
                     else if(rssi >= -70) signalColor = "#FF9800"; // Turuncu (iyi)
                     else if(rssi >= -80) signalColor = "#FFC107"; // Sarı (zayıf)
-                    
-                    // Sinyal çubuğu ikonu
-                    let signalIcon = "📶";
-                    if(rssi >= -50) signalIcon = "📶";
-                    else if(rssi >= -60) signalIcon = "📶";
-                    else if(rssi >= -70) signalIcon = "📶";
-                    else if(rssi >= -80) signalIcon = "📶";
-                    else signalIcon = "📶";
-                    
-                    wifiInfo.innerHTML = `
-                        <span style="color:${signalColor}">
-                            ${signalIcon} ${rssi}dBm (${quality}%) - ${status}
-                        </span>
-                    `;
-                    wifiInfo.title = `SSID: ${s.wifi_ssid || 'Bilinmiyor'}\nSinyal Gücü: ${rssi}dBm\nKalite: ${quality}%\nDurum: ${status}`;
+
+                    wifiInfo.innerHTML = `<span style="color:${signalColor}">📶 ${rssi}dBm</span>`;
+                    wifiInfo.title = `SSID: ${s.wifi_ssid || 'Bilinmiyor'}\nSinyal Gücü: ${rssi}dBm`;
                 } else {
                     wifiInfo.innerHTML = '<span style="color:#cf6679">📶 Çevrimdışı</span>';
                     wifiInfo.title = 'Cihaz çevrimdışı';
@@ -1125,6 +1131,7 @@ function loadProgValues(i) {
 }
 
 // --- AYARLAR SAYFASI ---
+// Tablo yerine kart listesi: telefonda ve bilgisayarda ayni gorunum
 function renderSettings() {
     fetchStatus().then(() => {
         let html = `
@@ -1139,116 +1146,48 @@ function renderSettings() {
             </div>
 
             <div id="scanResults"></div>
+            <div class="dev-list">`;
 
-            <div class="devices-table-wrapper">
-                <table id="devicesTable">
-                    <thead>
-                        <tr>
-                            <th class="cell-compact cell-name">Cihaz Adı</th>
-                            <th class="cell-compact cell-ip">IP Adresi</th>
-                            <th class="cell-compact cell-mac">MAC ID</th>
-                            <th class="cell-compact cell-rssi">WiFi Sinyal</th>
-                            <th class="cell-compact cell-status">Durum</th>
-                            <th class="cell-compact cell-actions">İşlemler</th>
-                            <th class="cell-delete">Sil</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-        
         DEVICES.forEach((d, i) => {
             const status = STATUS[d.name] || {};
-            const mac = status.mac || "?";
-            const online = status.r1_state !== "OFFLINE";
-            
-            // WiFi sinyal bilgisi
+            const mac = status.mac || d.mac || "?";
+            const online = status.r1_state !== undefined && status.r1_state !== "OFFLINE";
             const rssi = status.wifi_rssi;
-            const rssiIcon = getRSSIIcon(rssi);
-            const rssiClass = getRSSIClass(rssi);
-            const formattedRSSI = formatRSSI(rssi);
-            const wifiQuality = status.wifi_quality || 0;
-            const wifiSSID = status.wifi_ssid || 'Bilinmiyor';
-            
             html += `
-                    <tr>
-                        <td class="cell-name">
-                            <input type="text" id="n${i}" value="${d.name}"
-                                   class="compact-input" onchange="saveDevices()"
-                                   placeholder="Cihaz Adı"
-                                   title="Cihaz adını düzenle">
-                        </td>
-                        <td class="cell-ip">
-                            <input type="text" id="i${i}" value="${d.ip}"
-                                   class="compact-input" onchange="saveDevices()"
-                                   placeholder="192.168.1.x"
-                                   title="IP adresini düzenle">
-                        </td>
-                        <td class="cell-mac">
-                            <div class="mac-box-compact" title="${mac}">${mac}</div>
-                            <button onclick="refreshMac(${i})" 
-                                    class="btn" 
-                                    style="font-size:0.7em;padding:2px 5px;margin-top:3px;width:100%">
-                                    🔄 MAC Yenile
-                            </button>
-                        </td>
-                        <td class="cell-rssi">
-                            <div class="rssi-value-compact ${rssiClass}" 
-                                 title="WiFi: ${wifiSSID}
-Sinyal: ${formattedRSSI}
-Kalite: ${wifiQuality}%">
-                                <span class="rssi-icon">${rssiIcon}</span>${formattedRSSI}
-                                ${wifiQuality ? `<br><small>(${wifiQuality}%)</small>` : ''}
-                            </div>
-                            <button onclick="refreshRSSI(${i})" 
-                                    class="btn" 
-                                    style="font-size:0.7em;padding:2px 5px;margin-top:3px;width:100%">
-                                    🔄 Sinyal Yenile
-                            </button>
-                        </td>
-                        <td class="cell-status">
-                            <div class="status-indicator">
-                                <span class="status-dot-indicator ${online ? 'status-online' : 'status-offline'}"></span>
-                                <span style="color:${online ? '#0F0' : '#F00'}">
-                                    ${online ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}
-                                </span>
-                            </div>
-                        </td>
-                        <td class="cell-actions">
-                            <div class="device-action-btns-compact">
-                                <button class="device-action-btn-compact eeprom" 
-                                        onclick="deviceEepromClear(${i})" 
-                                        title="Cihaz EEPROM'unu sıfırla">
-                                    <span class="icon-small">💾</span> EEPROM Temizle
-                                </button>
-                                <button class="device-action-btn-compact wifi" 
-                                        onclick="deviceWifiClear(${i})" 
-                                        title="Cihaz WiFi ayarlarını sıfırla">
-                                    <span class="icon-small">📶</span> WiFi Temizle
-                                </button>
-                            </div>
-                        </td>
-                        <td class="cell-delete">
-                            <button class="delete-device-btn" 
-                                    onclick="del(${i})" 
-                                    title="${d.name} cihazını sil">
-                                🗑️
-                            </button>
-                        </td>
-                    </tr>`;
+                <div class="dev-card">
+                    <div class="dev-card-head">
+                        <span class="status-dot ${online ? 'online-dot' : 'offline-dot'}"></span>
+                        <input type="text" id="n${i}" value="${escHtml(d.name)}" class="compact-input" onchange="saveDevices()" placeholder="Cihaz Adı">
+                        <button class="delete-device-btn" onclick="del(${i})" title="Sil">🗑️</button>
+                    </div>
+                    <div class="dev-card-row"><span>IP</span>
+                        <input type="text" id="i${i}" value="${escHtml(d.ip)}" class="compact-input" onchange="saveDevices()" placeholder="192.168.1.x">
+                    </div>
+                    <div class="dev-card-row"><span>MAC</span>
+                        <div class="mac-box-compact" id="mac_${i}">${escHtml(mac)}</div>
+                        <button class="mini-btn" onclick="refreshMac(${i})">🔄</button>
+                    </div>
+                    <div class="dev-card-row"><span>Sinyal</span>
+                        <div class="rssi-value-compact ${getRSSIClass(rssi)}" id="rssi_${i}">${formatRSSI(rssi)}</div>
+                        <button class="mini-btn" onclick="refreshRSSI(${i})">🔄</button>
+                    </div>
+                    <div class="dev-card-row"><span>Özellik</span>
+                        <div class="feat-icons">${featIcons(d) || '<small style="color:#666">yok</small>'}</div>
+                    </div>
+                    <div class="device-action-btns-compact">
+                        <button class="device-action-btn-compact" style="background:#bb86fc;color:#000" onclick="route('/device?i=${i}')">⚙️ Ayarlar</button>
+                        <button class="device-action-btn-compact eeprom" onclick="deviceEepromClear(${i})">💾 EEPROM</button>
+                        <button class="device-action-btn-compact wifi" onclick="deviceWifiClear(${i})">📶 WiFi</button>
+                    </div>
+                </div>`;
         });
-        
-        html += `</tbody>
-                </table>
-            </div>
-            
-            <!-- Alt Bilgi -->
-            <div style="margin-top: 15px; padding: 10px; background: #252525; border-radius: 6px; font-size: 0.8em; color: #888;">
-                <div>📊 <b>${DEVICES.length}</b> cihaz kayıtlı</div>
-                <div style="margin-top: 5px; font-size: 0.75em;">
-                    💡 İpucu: Tabloyu yatay olarak kaydırarak tüm sütunları görebilirsiniz.
-                </div>
+
+        html += `</div>
+            <div style="margin-top:15px;padding:10px;background:#252525;border-radius:6px;font-size:0.8em;color:#888">
+                📊 <b>${DEVICES.length}</b> cihaz kayıtlı
             </div>
         </div>`;
-        
+
         document.getElementById("content").innerHTML = html;
     });
 }
@@ -1256,76 +1195,136 @@ Kalite: ${wifiQuality}%">
 // RSSI Yenileme
 function refreshRSSI(deviceIndex) {
     const device = DEVICES[deviceIndex];
-    const rssiElement = document.querySelector(`tr:nth-child(${deviceIndex+1}) .rssi-value-compact`);
-    
-    if (rssiElement) {
-        const originalText = rssiElement.textContent;
-        const originalClass = rssiElement.className;
-        
-        rssiElement.textContent = "⏳ Yenileniyor...";
-        rssiElement.className = "rssi-value-compact";
-        
-        // Cihazdan RSSI bilgisini yeniden çek
-        fetch(`/proxy?ip=${encodeURIComponent(device.ip)}&url=${encodeURIComponent("/status")}`)
-            .then(response => {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    throw new Error("Cihaza ulaşılamadı");
-                }
-            })
-            .then(data => {
-                const rssi = data.wifi_rssi;
-                const rssiIcon = getRSSIIcon(rssi);
-                const rssiClass = getRSSIClass(rssi);
-                const formattedRSSI = formatRSSI(rssi);
-                const wifiQuality = data.wifi_signal || 0;
-                
-                rssiElement.innerHTML = `
-                    <span class="rssi-icon">${rssiIcon}</span>${formattedRSSI}
-                    ${wifiQuality ? `<br><small>(${wifiQuality}%)</small>` : ''}
-                `;
-                rssiElement.className = `rssi-value-compact ${rssiClass}`;
-                rssiElement.title = `WiFi Sinyal Gücü: ${formattedRSSI}${wifiQuality ? ' - Kalite: ' + wifiQuality + '%' : ''}`;
-            })
-            .catch(error => {
-                rssiElement.textContent = "❌ Hata";
-                rssiElement.className = "rssi-value-compact rssi-offline";
-                rssiElement.title = "Sinyal bilgisi alınamadı";
-                
-                setTimeout(() => {
-                    rssiElement.innerHTML = originalText;
-                    rssiElement.className = originalClass;
-                }, 2000);
-            });
-    }
+    const el = document.getElementById(`rssi_${deviceIndex}`);
+    if (!el) return;
+    const originalText = el.textContent, originalClass = el.className;
+    el.textContent = "⏳";
+    fetch(`/proxy?ip=${encodeURIComponent(device.ip)}&url=${encodeURIComponent("/status")}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+            el.textContent = formatRSSI(data.wifi_rssi);
+            el.className = `rssi-value-compact ${getRSSIClass(data.wifi_rssi)}`;
+        })
+        .catch(() => {
+            el.textContent = "❌ Hata";
+            setTimeout(() => { el.textContent = originalText; el.className = originalClass; }, 2000);
+        });
 }
 
 // MAC ID Yenileme
 function refreshMac(deviceIndex) {
     const device = DEVICES[deviceIndex];
-    const macElement = document.querySelector(`tr:nth-child(${deviceIndex+1}) .mac-box-compact`);
-    
-    if (macElement) {
-        const originalText = macElement.textContent;
-        macElement.textContent = "⏳ Yenileniyor...";
-        macElement.style.color = "#FF9800";
-        
-        fetchStatus().then(() => {
-            const status = STATUS[device.name] || {};
-            const newMacId = status.mac || "Bulunamadı";
-            
-            macElement.textContent = newMacId;
-            macElement.style.color = status.mac !== "OFFLINE" && status.mac !== "NO_MAC" ? '#bb86fc' : '#666';
-        }).catch(() => {
-            macElement.textContent = "❌ Hata";
-            macElement.style.color = "#cf6679";
-            setTimeout(() => {
-                macElement.textContent = originalText;
-                macElement.style.color = '#bb86fc';
-            }, 2000);
-        });
+    const el = document.getElementById(`mac_${deviceIndex}`);
+    if (!el) return;
+    const originalText = el.textContent;
+    el.textContent = "⏳";
+    fetchStatus().then(() => {
+        const status = STATUS[device.name] || {};
+        el.textContent = status.mac || "Bulunamadı";
+    }).catch(() => {
+        el.textContent = "❌ Hata";
+        setTimeout(() => { el.textContent = originalText; }, 2000);
+    });
+}
+
+// --- CİHAZ ÖZELLİKLERİ + CİHAZ AYAR SAYFASI (/device?i=N) ---
+const FEATURES = [
+    {k: 'lamba',  icon: '💡', label: 'Lamba'},
+    {k: 'priz',   icon: '🔌', label: 'Priz'},
+    {k: 'dimmer', icon: '🎚️', label: 'Dimmer'}
+];
+const LIGHT_W_PER_PCT = 7;  // %1 aydinlik = 7 W/m2
+
+function featIcons(d) {
+    const f = Array.isArray(d.features) ? d.features : [];
+    return FEATURES.filter(x => f.includes(x.k)).map(x => `<span title="${x.label}">${x.icon}</span>`).join(' ');
+}
+
+function renderDevice() {
+    const i = parseInt(new URLSearchParams(location.search).get('i'));
+    const d = DEVICES[i];
+    if (!d) {
+        document.getElementById("content").innerHTML = `<div class="settings-container">Cihaz bulunamadı. <button class="btn" onclick="route('/settings')">Cihazlar</button></div>`;
+        return;
     }
+    fetchStatus().then(() => {
+        const c = WEATHER_CONFIG;
+        const targets = Array.isArray(c.targets) ? c.targets : [];
+        const feats = Array.isArray(d.features) ? d.features : [];
+        const toPct = w => Math.max(1, Math.round(w / LIGHT_W_PER_PCT));
+        const w = CURRENT_WEATHER;
+        const radPct = (typeof w.radiation === 'number' && w.radiation >= 0) ? Math.min(100, Math.round(w.radiation / LIGHT_W_PER_PCT)) : null;
+
+        let relays = '';
+        for (let r = 1; r <= 2; r++) {
+            const t = targets.find(t => t.device === d.name && t.relay === r);
+            const pct = toPct((t && t.light) || c.light_threshold || 60);
+            const act = (t && t.action) || c.action || 'ON';
+            relays += `
+            <div class="dev-card">
+                <label style="font-weight:bold"><input type="checkbox" id="da_${r}" ${t ? 'checked' : ''}> Röle ${r} — aydınlığa göre otomatik</label>
+                <div class="dev-card-row"><span>Eşik %</span><input type="number" min="1" max="100" step="1" id="dl_${r}" value="${pct}"></div>
+                <div class="dev-card-row"><span>İşlem</span><select id="dx_${r}"><option value="ON" ${act === 'ON' ? 'selected' : ''}>AÇ</option><option value="OFF" ${act === 'OFF' ? 'selected' : ''}>KAPAT</option></select></div>
+                <small style="color:#888">Eşiğin altında uygulanır, eşiğin 1.3 katı üstünde geri alınır.</small>
+            </div>`;
+        }
+
+        document.getElementById("content").innerHTML = `
+        <div class="settings-container" onchange="autoSaveDevice(${i})">
+            <h3>⚙️ ${escHtml(d.name)} <small style="color:#888;font-weight:normal">${escHtml(d.ip)}</small></h3>
+            <h4 style="margin-bottom:8px">Özellikler</h4>
+            <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:18px">
+                ${FEATURES.map(f => `<label><input type="checkbox" class="d_feat" value="${f.k}" ${feats.includes(f.k) ? 'checked' : ''}> ${f.icon} ${f.label}</label>`).join('')}
+            </div>
+            <h4 style="margin-bottom:8px">Aydınlık otomasyonu <small style="color:#888;font-weight:normal">şu an: %${radPct ?? '-'}</small></h4>
+            ${c.active ? '' : `<div style="color:#cf6679;font-size:0.85em;margin-bottom:8px">⚠ Oto-Hava genel olarak kapalı — <a href="#" onclick="route('/weather');return false;" style="color:#03dac6">aç</a></div>`}
+            <div class="dev-list">${relays}</div>
+            <br>
+            <button class="btn" onclick="route('/')">← Panel</button>
+        </div>`;
+    });
+}
+
+function autoSaveDevice(i) {
+    debounceSave("device", () => saveDeviceSettings(i), 600);
+}
+
+function saveDeviceSettings(i) {
+    const d = DEVICES[i];
+    if (!d) return;
+    const feats = Array.from(document.querySelectorAll('.d_feat:checked')).map(e => e.value);
+    const jobs = [];
+
+    if (JSON.stringify(feats) !== JSON.stringify(d.features || [])) {
+        const arr = DEVICES.map((x, j) => j === i ? Object.assign({}, x, {features: feats}) : x);
+        jobs.push(fetch("/save_devices", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(arr)
+        }).then(r => { if (!r.ok) throw new Error(); DEVICES = arr; }));
+    }
+
+    const mine = [];
+    for (let r = 1; r <= 2; r++) {
+        if (!document.getElementById('da_' + r).checked) continue;
+        const pct = Math.min(100, Math.max(1, parseInt(document.getElementById('dl_' + r).value) || 1));
+        mine.push({device: d.name, relay: r, light: pct * LIGHT_W_PER_PCT, action: document.getElementById('dx_' + r).value});
+    }
+    const old = WEATHER_CONFIG.targets || [];
+    const targets = old.filter(t => t.device !== d.name).concat(mine);
+    if (JSON.stringify(targets) !== JSON.stringify(old)) {
+        const cfg = Object.assign({}, WEATHER_CONFIG, {targets});
+        jobs.push(fetch("/save_weather_config", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(cfg)
+        }).then(r => { if (!r.ok) throw new Error(); WEATHER_CONFIG.targets = targets; }));
+    }
+
+    if (!jobs.length) return;
+    Promise.all(jobs)
+        .then(() => toast("✓ Kaydedildi"))
+        .catch(() => toast("✗ Kaydedilemedi", true));
 }
 
 // Cihaz EEPROM Temizleme
@@ -1375,6 +1374,7 @@ function readDeviceRows() {
         const n = document.getElementById("n"+j), ip = document.getElementById("i"+j);
         const row = { name: n ? n.value.trim() : DEVICES[j].name, ip: ip ? ip.value.trim() : DEVICES[j].ip };
         if (DEVICES[j].mac) row.mac = DEVICES[j].mac;  // HUB'in ogrendigi MAC - IP takibi icin korunur
+        if (DEVICES[j].features) row.features = DEVICES[j].features;
         arr.push(row);
     }
     return arr;
@@ -1529,20 +1529,12 @@ function renderWeather() {
         // Aydinlik %: %100 = acik ogle (~700 W/m2). HUB esigi W/m2 olarak tutar.
         const LIGHT_REF = 7;  // 1% = 7 W/m2
         const rad = (typeof w.radiation === 'number' && w.radiation >= 0) ? Math.round(w.radiation) : null;
-        const lt = c.light_threshold || 60;
-        const ltPct = Math.max(1, Math.round(lt / LIGHT_REF));
         const radPct = rad !== null ? Math.min(100, Math.round(rad / LIGHT_REF)) : null;
         if (rad !== null) {
-            const dark = rad < lt, bright = rad > lt * 1.3;
-            const st = dark ? ['KARANLIK — otomasyon lambayı yakar', '#2196F3']
-                     : bright ? ['AYDINLIK — otomasyonun yaktığı lamba söner', '#4CAF50']
-                     : ['ARADA — mevcut durum korunur', '#FF9800'];
             scoreInfo = `
-            <div style="background:#1a1a1a;padding:15px;border-radius:8px;margin-bottom:20px;border-left:5px solid ${st[1]}">
-                <div style="font-size:1.2em;font-weight:bold;color:${st[1]};margin-bottom:5px">☀️ AYDINLIK: %${radPct} <small style="color:#888;font-weight:normal">(${rad} W/m²)</small></div>
-                <div style="font-size:0.9em;color:#ccc;font-weight:500">${st[0]}</div>
+            <div style="background:#1a1a1a;padding:15px;border-radius:8px;margin-bottom:20px;border-left:5px solid #FF9800">
+                <div style="font-size:1.2em;font-weight:bold;color:#FF9800;margin-bottom:5px">☀️ AYDINLIK: %${radPct} <small style="color:#888;font-weight:normal">(${rad} W/m²)</small></div>
                 <div style="font-size:0.8em;color:#888;margin-top:8px">
-                    Yanar: %${ltPct} altı · Söner: %${Math.round(ltPct * 1.3)} üstü<br>
                     Kıyas: açık öğle %100 · kapalı/yağmurlu %7-20 · alacakaranlık %3 altı
                 </div>
             </div>`;
@@ -1583,14 +1575,12 @@ function renderWeather() {
                 <tr><td>Aktif:</td><td><input type="checkbox" id="w_active" ${c.active?'checked':''}></td></tr>
                 <tr><td>Cihaz/Röle:</td><td>${(() => {
                     const targets = Array.isArray(c.targets) ? c.targets : [];
-                    const isChecked = (name, r) => targets.some(t => t.device === name && t.relay === r);
-                    let rows = DEVICES.map(d => `
+                    const find = (name, r) => targets.find(t => t.device === name && t.relay === r);
+                    let rows = DEVICES.map((d, i) => [1, 2].map(r => `
                         <label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">
-                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="1" ${isChecked(d.name,1)?'checked':''}> ${escHtml(d.name)} R1
-                        </label>
-                        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">
-                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="2" ${isChecked(d.name,2)?'checked':''}> ${escHtml(d.name)} R2
-                        </label>`).join('');
+                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="${r}" ${find(d.name,r)?'checked':''}> ${escHtml(d.name)} R${r}
+                            <a href="#" onclick="route('/device?i=${i}');return false;" title="Cihaz ayarları" style="text-decoration:none">⚙️</a>
+                        </label>`).join('')).join('');
                     const ghosts = targets.filter(t => !DEVICES.some(d => d.name === t.device));
                     ghosts.forEach(t => {
                         rows += `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;color:#cf6679">
@@ -1599,8 +1589,6 @@ function renderWeather() {
                     });
                     return `<div style="display:flex;flex-wrap:wrap;gap:6px">${rows}</div>`;
                 })()}</td></tr>
-                <tr><td>İşlem:</td><td><select id="w_act"><option value="ON" ${c.action=='ON'?'selected':''}>AÇ</option><option value="OFF" ${c.action=='OFF'?'selected':''}>KAPAT</option></select></td></tr>
-                <tr><td>Aydınlık eşiği (%):</td><td><input type="number" min="1" max="100" step="1" id="w_light" value="${ltPct}"> <small style="color:#888">şu an: %${radPct ?? '-'} · altına düşünce yanar</small></td></tr>
                 <tr><td>Rüzgar Eşiği (Km/s):</td><td><input type="number" step="0.1" id="w_wind_threshold" placeholder="15.0" value="${c.wind_threshold||'15.0'}"></td></tr>
                 <tr><td>Şehir:</td><td><input type="text" id="w_city" placeholder="İstanbul" value="${c.city||''}"></td></tr>
                 <tr><td>İlçe:</td><td><input type="text" id="w_district" placeholder="Kadıköy" value="${c.district||''}"></td></tr>
@@ -1625,16 +1613,21 @@ function autoSaveWeather() {
 
 function saveWeather() {
     const addrBefore = [WEATHER_CONFIG.city || "", WEATHER_CONFIG.district || "", WEATHER_CONFIG.neighbourhood || ""].join("|");
-    const targets = Array.from(document.querySelectorAll('.w_target:checked')).map(el => ({
-        device: el.dataset.device,
-        relay: parseInt(el.dataset.relay)
-    }));
+    // Cihaz sayfasinda ayarlanan esik/islem korunur; yeni tiklenen genel varsayilani alir
+    const old = WEATHER_CONFIG.targets || [];
+    const targets = Array.from(document.querySelectorAll('.w_target:checked')).map(el => {
+        const t = { device: el.dataset.device, relay: parseInt(el.dataset.relay) };
+        const prev = old.find(o => o.device === t.device && o.relay === t.relay);
+        t.light = (prev && prev.light) || WEATHER_CONFIG.light_threshold || 60;
+        t.action = (prev && prev.action) || WEATHER_CONFIG.action || "ON";
+        return t;
+    });
     const cfg = {
         active: document.getElementById('w_active').checked,
         targets: targets,
         threshold: WEATHER_CONFIG.threshold || 3,  // isinim verisi yoksa yedek (eski bulut skoru)
-        light_threshold: Math.round((parseInt(document.getElementById('w_light').value) || 9) * 7),  // % -> W/m2
-        action: document.getElementById('w_act').value,
+        light_threshold: WEATHER_CONFIG.light_threshold || 60,
+        action: WEATHER_CONFIG.action || "ON",
         wind_threshold: parseFloat(document.getElementById('w_wind_threshold').value),
         city: document.getElementById('w_city').value.trim(),
         district: document.getElementById('w_district').value.trim(),
@@ -1754,6 +1747,9 @@ function navigate() {
         renderEvents();
     } else if(p === "/weather") {
         fetchDevices().then(renderWeather);
+    } else if(p === "/device") {
+        document.getElementById("nav2").className = "active";
+        fetchDevices().then(renderDevice);
     } else {
         fetchDevices().then(() => {
             renderControl();

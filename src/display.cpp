@@ -125,6 +125,7 @@ struct WeatherView {
   float temp = 0, wind = 0;
   int hum = 0, clouds = 0, code = -1;
   String dir, sunrise, sunset, city;
+  int fcN = 0, fcCode[7], fcMax[7], fcMin[7];  // [0]=dun, [1]=bugun
 };
 static WeatherView wv;
 
@@ -143,6 +144,14 @@ static bool readWeather() {
   wv.sunrise = CURRENT_WEATHER_DOC["sunrise_time"] | "";
   wv.sunset = CURRENT_WEATHER_DOC["sunset_time"] | "";
   wv.city = CURRENT_WEATHER_DOC["city_name"] | "";
+  wv.fcN = 0;
+  for (JsonArray d : CURRENT_WEATHER_DOC["fc"].as<JsonArray>()) {
+    if (wv.fcN >= 7) break;
+    wv.fcCode[wv.fcN] = d[0] | -1;
+    wv.fcMax[wv.fcN] = d[1] | 0;
+    wv.fcMin[wv.fcN] = d[2] | 0;
+    wv.fcN++;
+  }
   xSemaphoreGive(weatherMutex);
   return true;
 }
@@ -219,6 +228,70 @@ static void labelValue(TFT_eSPI& g, int x, int y, const char* label, const Strin
   g.drawString(value, x + g.textWidth(label, 2) + 6, y, 2);
 }
 
+enum Scene : uint8_t { SC_NONE, SC_CLEAR, SC_PARTLY, SC_CLOUDY, SC_FOG, SC_DRIZZLE, SC_RAIN, SC_SNOW, SC_THUNDER };
+
+static Scene sceneFromCode(int c) {
+  if (c == 0) return SC_CLEAR;
+  if (c == 1 || c == 2) return SC_PARTLY;
+  if (c == 45 || c == 48) return SC_FOG;
+  if (c >= 51 && c <= 57) return SC_DRIZZLE;
+  if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return SC_RAIN;
+  if ((c >= 71 && c <= 77) || c == 85 || c == 86) return SC_SNOW;
+  if (c >= 95) return SC_THUNDER;
+  return SC_CLOUDY;  // 3 ve bilinmeyenler
+}
+
+// ~26x20 kutuda WMO koduna gore ikon; daire tabanli, olcek esit (en/boy korunur)
+static void miniCloud(TFT_eSPI& g, int cx, int cy, uint16_t col) {
+  g.fillCircle(cx - 5, cy + 1, 4, col);
+  g.fillCircle(cx + 1, cy - 2, 5, col);
+  g.fillCircle(cx + 6, cy + 1, 4, col);
+  g.fillRect(cx - 5, cy + 1, 11, 4, col);
+}
+
+static void drawMiniIcon(TFT_eSPI& g, int cx, int cy, int code, bool past, const PanelColors& c) {
+  uint16_t sun = past ? c.gray : c.orange;
+  uint16_t cloud = past ? c.gray : c.white;
+  uint16_t drop = past ? c.gray : c.cyan;
+  switch (code < 0 ? SC_NONE : sceneFromCode(code)) {
+    case SC_CLEAR:
+      g.fillCircle(cx, cy, 5, sun);
+      for (int a = 0; a < 8; a++) {
+        float r = a * PI / 4;
+        g.drawLine(cx + cosf(r) * 7, cy + sinf(r) * 7, cx + cosf(r) * 9, cy + sinf(r) * 9, sun);
+      }
+      break;
+    case SC_PARTLY:
+      g.fillCircle(cx - 4, cy - 3, 5, sun);
+      miniCloud(g, cx + 2, cy + 2, cloud);
+      break;
+    case SC_FOG:
+      for (int k = -1; k <= 1; k++) g.drawFastHLine(cx - 9, cy + k * 5, 18, c.gray);
+      break;
+    case SC_DRIZZLE:
+    case SC_RAIN:
+      miniCloud(g, cx, cy - 3, cloud);
+      for (int k = -1; k <= 1; k++) g.drawLine(cx + k * 5, cy + 5, cx + k * 5 - 2, cy + 9, drop);
+      break;
+    case SC_SNOW:
+      miniCloud(g, cx, cy - 3, cloud);
+      for (int k = -1; k <= 1; k++) g.fillCircle(cx + k * 5, cy + 7, 1, c.white);
+      break;
+    case SC_THUNDER:
+      miniCloud(g, cx, cy - 3, cloud);
+      g.drawLine(cx + 1, cy + 3, cx - 2, cy + 7, sun);
+      g.drawLine(cx - 2, cy + 7, cx + 2, cy + 7, sun);
+      g.drawLine(cx + 2, cy + 7, cx - 1, cy + 10, sun);
+      break;
+    case SC_NONE:
+      g.drawString("?", cx, cy - 4, 1);
+      break;
+    default:  // SC_CLOUDY
+      miniCloud(g, cx, cy, cloud);
+      break;
+  }
+}
+
 static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Sicaklik (etiket yerine hava aciklamasi: "Kapali", "Yagmurlu"...)
   g.fillRoundRect(6, oy + 6, 150, 80, 7, c.panel);
@@ -257,30 +330,33 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
     g.drawString("--", 170, oy + 30, 7);
   }
 
-  // Alt bilgi
-  g.fillRoundRect(6, oy + 138, 308, 42, 7, c.panel);
-  g.drawRoundRect(6, oy + 138, 308, 42, 7, c.gray);
-  if (wv.ok) {
-    labelValue(g, 14, oy + 142, "Nem", "%" + String(wv.hum), c.white, c);
-    labelValue(g, 164, oy + 142, "Bulut", "%" + String(wv.clouds), c.white, c);
-    labelValue(g, 14, oy + 160, "Dogus", wv.sunrise.length() ? wv.sunrise : "--", c.orange, c);
-    labelValue(g, 164, oy + 160, "Batis", wv.sunset.length() ? wv.sunset : "--", c.cyan, c);
+  // Alt bilgi: nem/bulut + 7 gunluk tahmin (dun, BUGUN, +5 gun)
+  g.fillRoundRect(6, oy + 108, 308, 74, 7, c.panel);
+  g.drawRoundRect(6, oy + 108, 308, 74, 7, c.gray);
+  if (!wv.ok) return;
+  labelValue(g, 14, oy + 111, "Nem", "%" + String(wv.hum), c.white, c);
+  labelValue(g, 164, oy + 111, "Bulut", "%" + String(wv.clouds), c.white, c);
+
+  static const char* DAYS[7] = {"Pz", "Pt", "Sa", "Ca", "Pe", "Cu", "Ct"};
+  struct tm t;
+  int todayW = getLocalTime(&t, 0) ? t.tm_wday : -1;
+  const int colW = 43, x0 = 10;
+  g.setTextDatum(TC_DATUM);
+  for (int i = 0; i < wv.fcN; i++) {
+    int cx = x0 + i * colW + colW / 2;
+    bool today = (i == 1), past = (i == 0);
+    if (today) g.drawRoundRect(cx - colW / 2 + 1, oy + 128, colW - 2, 52, 5, c.orange);
+    uint16_t txt = today ? c.orange : past ? c.gray : c.white;
+    g.setTextColor(txt, c.panel);
+    g.drawString(todayW < 0 ? "--" : (today ? "BUGUN" : DAYS[(todayW + i + 6) % 7]), cx, oy + 131, 1);
+    drawMiniIcon(g, cx, oy + 150, wv.fcCode[i], past, c);
+    g.setTextColor(txt, c.panel);
+    g.drawString(String(wv.fcMax[i]) + "/" + String(wv.fcMin[i]), cx, oy + 167, 1);
   }
+  g.setTextDatum(TL_DATUM);
 }
 
 // ============== Canli hava sahnesi ==============
-enum Scene : uint8_t { SC_NONE, SC_CLEAR, SC_PARTLY, SC_CLOUDY, SC_FOG, SC_DRIZZLE, SC_RAIN, SC_SNOW, SC_THUNDER };
-
-static Scene sceneFromCode(int c) {
-  if (c == 0) return SC_CLEAR;
-  if (c == 1 || c == 2) return SC_PARTLY;
-  if (c == 45 || c == 48) return SC_FOG;
-  if (c >= 51 && c <= 57) return SC_DRIZZLE;
-  if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return SC_RAIN;
-  if ((c >= 71 && c <= 77) || c == 85 || c == 86) return SC_SNOW;
-  if (c >= 95) return SC_THUNDER;
-  return SC_CLOUDY;  // 3 ve bilinmeyenler
-}
 
 static float frand(float a, float b) { return a + (b - a) * (esp_random() / 4294967295.0f); }
 
@@ -405,7 +481,7 @@ static uint32_t nextStrikeMs = 0, strikeEndMs = 0;
 static int16_t boltX[7], boltY[7];
 
 // Sahnenin "pencere" bandi: panellerin arasinda serbest kalan orta bolge
-const int WIN_TOP = 86, WIN_BOT = 138, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
+const int WIN_TOP = 86, WIN_BOT = 108, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
 
 static void initScene(Scene sc, bool day) {
   dropCount = 0;

@@ -73,10 +73,11 @@ void saveDevices(String json) {
           xSemaphoreGive(scheduleMutex);
         }
         if (xSemaphoreTake(weatherMutex, MUTEX_TIMEOUT) == pdTRUE) {
-          if ((WEATHER_CONFIG_DOC["device_name"] | String("")) == oldName) {
-            WEATHER_CONFIG_DOC["device_name"] = newName;
-            saveWeatherConfig();
+          bool renamed = false;
+          for (JsonObject t : WEATHER_CONFIG_DOC["targets"].as<JsonArray>()) {
+            if ((t["device"] | String("")) == oldName) { t["device"] = newName; renamed = true; }
           }
+          if (renamed) saveWeatherConfig();
           xSemaphoreGive(weatherMutex);
         }
         Serial.printf("[Cihaz] yeniden adlandirildi: %s -> %s (ayarlar tasindi)\n", oldName.c_str(), newName.c_str());

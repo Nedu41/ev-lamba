@@ -565,6 +565,7 @@ void setupWebServer() {
   server.on("/settings", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/weather", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/log", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/device", AsyncWebRequestMethod::HTTP_GET, handleRoot);
   server.on("/events", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", eventsJson());
   });

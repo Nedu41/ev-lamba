@@ -56,7 +56,9 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
   // (168 saat x 4 alan) isteniyordu - ekran sprite'lari heap'i azaltinca
   // deserializeJson "NoMemory" ile basarisiz oldu (2026-09-27 seri log).
   // Saatlik ruzgar alanlari da kaldirildi: ruzgar current blogundan geliyor.
-  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&hourly=cloudcover,relativehumidity_2m" + "&daily=sunrise,sunset" + "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day,shortwave_radiation&timezone=auto&forecast_days=1&models=ecmwf_ifs025";
+  // Bulut/nem artik "current" blogundan - saatlik dizi 7 gunde bellege sigmiyordu.
+  // Gunluk: past_days=1 + forecast_days=6 -> 7 gun, indeks 1 = bugun (ekranda 2. sira).
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset" + "&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_direction_10m,weather_code,is_day,shortwave_radiation&timezone=auto&past_days=1&forecast_days=6&models=ecmwf_ifs025";
 
   Serial.printf("DEBUG: Open-Meteo URL: %s\n", url.c_str());
 
@@ -107,6 +109,8 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
     // Gercek isik: yere ulasan gunes isinimi (W/m2). Bulut yuzdesinden tahmin
     // etmek yerine bulut otomasyonu bununla karar verir (-1: veri yok).
     out["radiation"] = cw["shortwave_radiation"] | -1.0f;
+    out["clouds"] = cw["cloud_cover"] | 0;
+    out["humidity"] = cw["relative_humidity_2m"] | 0;
   } else {
     Serial.println("DEBUG: current anahtarı yok!");
     out["temp"] = 0.0f;
@@ -114,44 +118,33 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
     out["wind_dir"] = 0.0f;
   }
 
-  // Saatlik dizilerde su anki saatin indeksi (bulut VE nem ayni saatten)
-  int hourIdx = 0;
-  JsonArray timeArr = scratch["hourly"]["time"].as<JsonArray>();
-  if (!timeArr.isNull()) {
-    time_t nowt = time(nullptr);
-    struct tm tmnow;
-    localtime_r(&nowt, &tmnow);
-    char target[20];
-    snprintf(target, sizeof(target), "%04d-%02d-%02dT%02d:00",
-             tmnow.tm_year + 1900, tmnow.tm_mon + 1, tmnow.tm_mday, tmnow.tm_hour);
-    for (size_t i = 0; i < timeArr.size(); i++) {
-      const char* t = timeArr[i];
-      if (t && strcmp(t, target) == 0) { hourIdx = i; break; }
-    }
+  // Haftalik tahmin: [[kod, max, min], ...] - indeks 1 bugun
+  JsonArray fcOut = out["fc"].to<JsonArray>();
+  JsonArray dCode = scratch["daily"]["weather_code"].as<JsonArray>();
+  JsonArray dMax = scratch["daily"]["temperature_2m_max"].as<JsonArray>();
+  JsonArray dMin = scratch["daily"]["temperature_2m_min"].as<JsonArray>();
+  for (size_t i = 0; i < dCode.size() && i < 7; i++) {
+    JsonArray d = fcOut.add<JsonArray>();
+    d.add(dCode[i] | -1);
+    d.add((int)roundf(dMax[i] | 0.0f));
+    d.add((int)roundf(dMin[i] | 0.0f));
   }
 
-  JsonArray clouds = scratch["hourly"]["cloudcover"].as<JsonArray>();
-  out["clouds"] = (hourIdx < (int)clouds.size()) ? clouds[hourIdx].as<int>() : 0;
-
-  // BUGFIX: nem eskiden hep rh[0] (gece 00:00) okunuyordu, su anki saat degil
-  JsonArray rh = scratch["hourly"]["relativehumidity_2m"].as<JsonArray>();
-  out["humidity"] = (hourIdx < (int)rh.size()) ? rh[hourIdx].as<int>() : 0;
-
-  // Gün doğumu ve batımı
+  // Gün doğumu ve batımı (bugun = indeks 1, past_days=1 yuzunden)
   if (scratch.containsKey("daily") && scratch["daily"].containsKey("sunrise") && scratch["daily"].containsKey("sunset")) {
     JsonArray sunriseArr = scratch["daily"]["sunrise"].as<JsonArray>();
     JsonArray sunsetArr = scratch["daily"]["sunset"].as<JsonArray>();
 
-    if (sunriseArr.size() > 0) {
-      const char* sunriseStr = sunriseArr[0];
+    if (sunriseArr.size() > 1) {
+      const char* sunriseStr = sunriseArr[1];
       String sunrise = String(sunriseStr);
       if (sunrise.length() >= 16) {
         out["sunrise_time"] = sunrise.substring(11, 16);  // Saat:dakika kısmını al
       }
     }
 
-    if (sunsetArr.size() > 0) {
-      const char* sunsetStr = sunsetArr[0];
+    if (sunsetArr.size() > 1) {
+      const char* sunsetStr = sunsetArr[1];
       String sunset = String(sunsetStr);
       if (sunset.length() >= 16) {
         out["sunset_time"] = sunset.substring(11, 16);  // Saat:dakika kısmını al
@@ -262,6 +255,7 @@ void updateWeatherFromConfig() {
     CURRENT_WEATHER_DOC["description"]  = "OK";
     CURRENT_WEATHER_DOC["sunrise_time"] = out["sunrise_time"] | "";
     CURRENT_WEATHER_DOC["sunset_time"]  = out["sunset_time"] | "";
+    CURRENT_WEATHER_DOC["fc"].set(out["fc"]);
 
     int clouds = CURRENT_WEATHER_DOC["clouds"] | 0;
     int lightnessScore = 0;
