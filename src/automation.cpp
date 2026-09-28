@@ -14,8 +14,8 @@
 // ayni otomasyona baglanabiliyor. Her hedefin kendi esigi ("light") ve islemi var.
 void weatherControlLogic(int currentMinute) {
 
-  bool weatherActive = WEATHER_CONFIG_DOC["active"] | false;
-  if (!weatherActive) return;
+  // Genel "active" anahtari kaldirildi: her role cihaz ayar sayfasindaki
+  // kendi tikiyle (targets listesinde olup olmamasi) acilip kapaniyor.
 
   // BUGFIX: lastManualControlAction baslangicta 0 - "0" kontrolu olmadan her
   // acilistan sonra hic manuel kontrol yapilmadigi halde otomasyon 10dk atlaniyordu

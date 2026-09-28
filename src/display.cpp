@@ -196,6 +196,15 @@ void drawClock(bool force) {
   tft.setTextDatum(TR_DATUM);
   tft.setTextColor(TFT_WHITE, COL_HEADER);
   tft.drawString(buf, 312, 3, 4);
+
+  // Kisa tarih (surumun ustunde): "28 Eyl Pzt"
+  static const char* MON[12] = {"Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"};
+  static const char* WD[7] = {"Paz","Pzt","Sal","Car","Per","Cum","Cmt"};
+  char date[16];
+  snprintf(date, sizeof(date), "%d %s %s", t.tm_mday, MON[t.tm_mon], WD[t.tm_wday]);
+  tft.fillRect(168, 0, 72, 12, COL_HEADER);
+  tft.setTextColor(TFT_WHITE, COL_HEADER);
+  tft.drawString(date, 234, 3, 1);
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -204,11 +213,11 @@ static void drawHeader() {
   tft.drawFastHLine(0, HEADER_H - 1, 320, COL_CYAN);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(COL_CYAN, COL_HEADER);
-  tft.drawString(fitText(wv.city.length() ? shortLocation(wv.city) : "Merkezi HUB", 180, 2), 8, 7, 2);
-  // Surum: kucuk ama okunur (GLCD 6x8), saatin hemen solunda
+  tft.drawString(fitText(wv.city.length() ? shortLocation(wv.city) : "Merkezi HUB", 155, 2), 8, 7, 2);
+  // Surum: kucuk ama okunur (GLCD 6x8), tarihin altinda
   tft.setTextDatum(TR_DATUM);
   tft.setTextColor(COL_GRAY, COL_HEADER);
-  tft.drawString("v" FW_VERSION, 234, 12, 1);
+  tft.drawString("v" FW_VERSION, 234, 16, 1);
   tft.setTextDatum(TL_DATUM);
   drawClock(true);
 }
@@ -330,12 +339,12 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
     g.drawString("--", 170, oy + 30, 7);
   }
 
-  // Alt bilgi: nem/bulut + 7 gunluk tahmin (dun, BUGUN, +5 gun)
-  g.fillRoundRect(6, oy + 108, 308, 74, 7, c.panel);
-  g.drawRoundRect(6, oy + 108, 308, 74, 7, c.gray);
-  if (!wv.ok) return;
-  labelValue(g, 14, oy + 111, "Nem", "%" + String(wv.hum), c.white, c);
-  labelValue(g, 164, oy + 111, "Bulut", "%" + String(wv.clouds), c.white, c);
+  // Alt bilgi: 7 gunluk tahmin ikonlari (dun, BUGUN, +5 gun) - ince serit,
+  // arka plandaki animasyonu fazla kapatmasin
+  if (!wv.ok || wv.fcN == 0) return;
+  const int py = oy + 134, ph = 46;
+  g.fillRoundRect(6, py, 308, ph, 7, c.panel);
+  g.drawRoundRect(6, py, 308, ph, 7, c.gray);
 
   static const char* DAYS[7] = {"Pz", "Pt", "Sa", "Ca", "Pe", "Cu", "Ct"};
   struct tm t;
@@ -345,13 +354,13 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   for (int i = 0; i < wv.fcN; i++) {
     int cx = x0 + i * colW + colW / 2;
     bool today = (i == 1), past = (i == 0);
-    if (today) g.drawRoundRect(cx - colW / 2 + 1, oy + 128, colW - 2, 52, 5, c.orange);
+    if (today) g.drawRoundRect(cx - colW / 2 + 1, py + 2, colW - 2, ph - 4, 5, c.orange);
     uint16_t txt = today ? c.orange : past ? c.gray : c.white;
     g.setTextColor(txt, c.panel);
-    g.drawString(todayW < 0 ? "--" : (today ? "BUGUN" : DAYS[(todayW + i + 6) % 7]), cx, oy + 131, 1);
-    drawMiniIcon(g, cx, oy + 150, wv.fcCode[i], past, c);
-    g.setTextColor(txt, c.panel);
-    g.drawString(String(wv.fcMax[i]) + "/" + String(wv.fcMin[i]), cx, oy + 167, 1);
+    g.drawString(todayW < 0 ? "--" : (today ? "BUGUN" : DAYS[(todayW + i + 6) % 7]), cx, py + 4, 1);
+    g.setTextColor(past ? c.gray : c.cyan, c.panel);
+    g.drawString(String(wv.fcMax[i]) + "/" + String(wv.fcMin[i]), cx, py + 14, 1);
+    drawMiniIcon(g, cx, py + 33, wv.fcCode[i], past, c);
   }
   g.setTextDatum(TL_DATUM);
 }
@@ -481,7 +490,7 @@ static uint32_t nextStrikeMs = 0, strikeEndMs = 0;
 static int16_t boltX[7], boltY[7];
 
 // Sahnenin "pencere" bandi: panellerin arasinda serbest kalan orta bolge
-const int WIN_TOP = 86, WIN_BOT = 108, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
+const int WIN_TOP = 86, WIN_BOT = 134, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
 
 static void initScene(Scene sc, bool day) {
   dropCount = 0;

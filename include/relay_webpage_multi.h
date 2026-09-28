@@ -1277,7 +1277,6 @@ function renderDevice() {
                 ${FEATURES.map(f => `<label><input type="checkbox" class="d_feat" value="${f.k}" ${feats.includes(f.k) ? 'checked' : ''}> ${f.icon} ${f.label}</label>`).join('')}
             </div>
             <h4 style="margin-bottom:8px">Aydınlık otomasyonu <small style="color:#888;font-weight:normal">şu an: %${radPct ?? '-'}</small></h4>
-            ${c.active ? '' : `<div style="color:#cf6679;font-size:0.85em;margin-bottom:8px">⚠ Oto-Hava genel olarak kapalı — <a href="#" onclick="route('/weather');return false;" style="color:#03dac6">aç</a></div>`}
             <div class="dev-list">${relays}</div>
             <br>
             <button class="btn" onclick="route('/')">← Panel</button>
@@ -1563,32 +1562,13 @@ function renderWeather() {
             
             ${scoreInfo}
             
-            <!-- Durum Mesajı -->
+            ${statusIcon === "✅" ? '' : `
             <div style="background:#1a1a1a;padding:10px;border-radius:5px;margin-bottom:20px;border:2px solid ${statusColor};text-align:center">
-                <span style="color:${statusColor};font-weight:bold;font-size:1.1em">
-                    ${statusIcon} ${statusMessage}
-                </span>
-            </div>
-            
+                <span style="color:${statusColor};font-weight:bold;font-size:1.1em">${statusMessage}</span>
+            </div>`}
+
             <!-- Ayarlar Formu - her alan degisince otomatik kaydedilir -->
             <table id="weatherForm" onchange="autoSaveWeather()">
-                <tr><td>Aktif:</td><td><input type="checkbox" id="w_active" ${c.active?'checked':''}></td></tr>
-                <tr><td>Cihaz/Röle:</td><td>${(() => {
-                    const targets = Array.isArray(c.targets) ? c.targets : [];
-                    const find = (name, r) => targets.find(t => t.device === name && t.relay === r);
-                    let rows = DEVICES.map((d, i) => [1, 2].map(r => `
-                        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">
-                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="${r}" ${find(d.name,r)?'checked':''}> ${escHtml(d.name)} R${r}
-                            <a href="#" onclick="route('/device?i=${i}');return false;" title="Cihaz ayarları" style="text-decoration:none">⚙️</a>
-                        </label>`).join('')).join('');
-                    const ghosts = targets.filter(t => !DEVICES.some(d => d.name === t.device));
-                    ghosts.forEach(t => {
-                        rows += `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;color:#cf6679">
-                            <input type="checkbox" class="w_target" data-device="${escHtml(t.device)}" data-relay="${t.relay}" checked> ⚠ ${escHtml(t.device)} R${t.relay} (listede yok)
-                        </label>`;
-                    });
-                    return `<div style="display:flex;flex-wrap:wrap;gap:6px">${rows}</div>`;
-                })()}</td></tr>
                 <tr><td>Rüzgar Eşiği (Km/s):</td><td><input type="number" step="0.1" id="w_wind_threshold" placeholder="15.0" value="${c.wind_threshold||'15.0'}"></td></tr>
                 <tr><td>Şehir:</td><td><input type="text" id="w_city" placeholder="İstanbul" value="${c.city||''}"></td></tr>
                 <tr><td>İlçe:</td><td><input type="text" id="w_district" placeholder="Kadıköy" value="${c.district||''}"></td></tr>
@@ -1613,18 +1593,10 @@ function autoSaveWeather() {
 
 function saveWeather() {
     const addrBefore = [WEATHER_CONFIG.city || "", WEATHER_CONFIG.district || "", WEATHER_CONFIG.neighbourhood || ""].join("|");
-    // Cihaz sayfasinda ayarlanan esik/islem korunur; yeni tiklenen genel varsayilani alir
-    const old = WEATHER_CONFIG.targets || [];
-    const targets = Array.from(document.querySelectorAll('.w_target:checked')).map(el => {
-        const t = { device: el.dataset.device, relay: parseInt(el.dataset.relay) };
-        const prev = old.find(o => o.device === t.device && o.relay === t.relay);
-        t.light = (prev && prev.light) || WEATHER_CONFIG.light_threshold || 60;
-        t.action = (prev && prev.action) || WEATHER_CONFIG.action || "ON";
-        return t;
-    });
+    // Hedefler (role/esik) cihaz ayar sayfasinda - burada aynen korunur
     const cfg = {
-        active: document.getElementById('w_active').checked,
-        targets: targets,
+        active: true,
+        targets: WEATHER_CONFIG.targets || [],
         threshold: WEATHER_CONFIG.threshold || 3,  // isinim verisi yoksa yedek (eski bulut skoru)
         light_threshold: WEATHER_CONFIG.light_threshold || 60,
         action: WEATHER_CONFIG.action || "ON",
