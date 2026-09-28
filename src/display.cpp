@@ -217,10 +217,19 @@ static void labelValue(TFT_eSPI& g, int x, int y, const char* label, const Strin
   g.drawString(value, x + g.textWidth(label, 2) + 6, y, 2);
 }
 
+// "Buzlu cam" hissi: ust kenarda noktali (yarim yogunlukta) parlak cizgi.
+// Gercek alfa-blend yerine bu - 4-bit paletli sahne sprite'inda (16 renk
+// dolu) rastgele saydamlik degeri karisamayiz, ama palette zaten olan
+// P_WHITE ile dithering ekstra bellek/renk gerektirmeden ayni izlenimi verir.
+static void glassTop(TFT_eSPI& g, int x, int y, int w, const PanelColors& c) {
+  for (int i = 3; i < w - 3; i += 2) g.drawPixel(x + i, y + 1, c.white);
+}
+
 static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Sicaklik (etiket yerine hava aciklamasi: "Kapali", "Yagmurlu"...)
   g.fillRoundRect(6, oy + 6, 150, 80, 7, c.panel);
   g.drawRoundRect(6, oy + 6, 150, 80, 7, c.orange);
+  glassTop(g, 6, oy + 6, 150, c);
   const char* desc = !wv.loaded ? "Bekleniyor..." : !wv.ok ? "Veri alinamadi" : weatherText(wv.code);
   g.setTextColor(wv.loaded && !wv.ok ? c.red : c.white, c.panel);
   g.drawString(fitText(desc, 136, 2), 14, oy + 10, 2);
@@ -239,6 +248,7 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Ruzgar
   g.fillRoundRect(164, oy + 6, 150, 80, 7, c.panel);
   g.drawRoundRect(164, oy + 6, 150, 80, 7, c.cyan);
+  glassTop(g, 164, oy + 6, 150, c);
   g.setTextColor(c.gray, c.panel);
   g.drawString("RUZGAR", 172, oy + 10, 2);
   g.setTextColor(c.cyan, c.panel);
@@ -258,6 +268,7 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Alt bilgi
   g.fillRoundRect(6, oy + 138, 308, 42, 7, c.panel);
   g.drawRoundRect(6, oy + 138, 308, 42, 7, c.gray);
+  glassTop(g, 6, oy + 138, 308, c);
   if (wv.ok) {
     labelValue(g, 14, oy + 142, "Nem", "%" + String(wv.hum), c.white, c);
     labelValue(g, 164, oy + 142, "Bulut", "%" + String(wv.clouds), c.white, c);
