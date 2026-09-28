@@ -1176,8 +1176,8 @@ function renderSettings() {
                     </div>
                     <div class="device-action-btns-compact">
                         <button class="device-action-btn-compact" style="background:#bb86fc;color:#000" onclick="route('/device?i=${i}')">⚙️ Ayarlar</button>
-                        <button class="device-action-btn-compact eeprom" onclick="deviceEepromClear(${i})">💾 EEPROM</button>
-                        <button class="device-action-btn-compact wifi" onclick="deviceWifiClear(${i})">📶 WiFi</button>
+                        <button class="device-action-btn-compact eeprom" onclick="deviceClear(${i}, this, 'eeprom')">💾 EEPROM</button>
+                        <button class="device-action-btn-compact wifi" onclick="deviceClear(${i}, this, 'wifi')">📶 WiFi</button>
                     </div>
                 </div>`;
         });
@@ -1326,42 +1326,29 @@ function saveDeviceSettings(i) {
         .catch(() => toast("✗ Kaydedilemedi", true));
 }
 
-// Cihaz EEPROM Temizleme
-function deviceEepromClear(deviceIndex) {
+// Cihaz EEPROM / WiFi temizleme - dugmenin kendisi sonucu gosterir
+function deviceClear(deviceIndex, btn, kind) {
     const device = DEVICES[deviceIndex];
-    
-    fetch(`/proxy?ip=${encodeURIComponent(device.ip)}&url=${encodeURIComponent("/eeprom_clr")}`)
-        .then(response => {
-            if (response.ok) {
-                alert(`✅ ${device.name} cihazının EEPROM'u başarıyla sıfırlandı.\nCihaz yeniden başlatılacak.`);
-                // Durumu güncelle
-                setTimeout(() => fetchStatus(), 3000);
-            } else {
-                throw new Error("EEPROM temizleme başarısız");
-            }
-        })
-        .catch(error => {
-            alert(`❌ Hata: ${device.name} cihazının EEPROM'u sıfırlanamadı.\nCihaz çevrimdışı olabilir.`);
-        });
-}
-
-// Cihaz WiFi Temizleme
-function deviceWifiClear(deviceIndex) {
-    const device = DEVICES[deviceIndex];
-    
-    fetch(`/proxy?ip=${encodeURIComponent(device.ip)}&url=${encodeURIComponent("/wifi_clr")}`)
-        .then(response => {
-            if (response.ok) {
-                alert(`✅ ${device.name} cihazının WiFi ayarları sıfırlandı.\nCihaz WiFi ayarlama moduna geçti.`);
-                // Durumu güncelle
-                setTimeout(() => fetchStatus(), 3000);
-            } else {
-                throw new Error("WiFi temizleme başarısız");
-            }
-        })
-        .catch(error => {
-            alert(`❌ Hata: ${device.name} cihazının WiFi ayarları sıfırlanamadı.\nCihaz çevrimdışı olabilir.`);
-        });
+    const isWifi = kind === 'wifi';
+    const what = isWifi ? 'WiFi ayarları' : 'EEPROM (zamanlayıcı/MQTT ayarları)';
+    const after = isWifi ? 'Cihaz ağdan düşecek ve ESP01_SETUP ağını açacak.' : 'Cihaz yeniden başlayacak.';
+    if (!confirm(`${device.name}: ${what} silinsin mi?\n${after}`)) return;
+    const orig = btn.innerHTML, origBg = btn.style.background, origCol = btn.style.color;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Siliniyor...';
+    const done = (ok) => {
+        btn.innerHTML = ok ? '✓ Silindi' : '✗ Hata';
+        btn.style.background = ok ? '#4CAF50' : '#cf6679';
+        btn.style.color = '#fff';
+        toast(ok ? `✓ ${device.name}: ${isWifi ? 'WiFi' : 'EEPROM'} silindi` : `✗ ${device.name}: silinemedi (çevrimdışı olabilir)`, !ok);
+        setTimeout(() => {
+            btn.innerHTML = orig; btn.style.background = origBg; btn.style.color = origCol; btn.disabled = false;
+        }, 4000);
+        if (ok) setTimeout(() => fetchStatus(), 5000);
+    };
+    fetch(`/proxy?ip=${encodeURIComponent(device.ip)}&url=${encodeURIComponent(isWifi ? '/wifi_clr' : '/eeprom_clr')}`)
+        .then(r => done(r.ok))
+        .catch(() => done(false));
 }
 
 // Cihaz listesi - isim/IP alanindan cikinca otomatik kaydedilir (Kaydet butonu yok)
