@@ -9,6 +9,9 @@
 #include "events.h"
 
 // ============== Existing weatherControlLogic ==============
+// DEGISTI: tek cihaz/role yerine COKLU hedef ("targets": [{device,relay},...])
+// - web arayuzunde artik dropdown degil tikli kutular, birden fazla lamba
+// ayni otomasyona baglanabiliyor. Esik/islem tum hedefler icin ortak.
 void weatherControlLogic(int currentMinute) {
 
   bool weatherActive = WEATHER_CONFIG_DOC["active"] | false;
@@ -39,25 +42,34 @@ void weatherControlLogic(int currentMinute) {
   int threshold       = WEATHER_CONFIG_DOC["threshold"]   | 3;
   float radiation     = CURRENT_WEATHER_DOC["radiation"] | -1.0f;
   float lightOn       = WEATHER_CONFIG_DOC["light_threshold"] | 60;
-  String deviceName   = WEATHER_CONFIG_DOC["device_name"] | "";
-  int relayId          = WEATHER_CONFIG_DOC["relay_id"]    | 0;
   String action        = WEATHER_CONFIG_DOC["action"]      | "ON";
+
+  // Hedef listesini mutex ICINDEYKEN yerel diziye kopyala - JsonArray
+  // WEATHER_CONFIG_DOC'a bagli referans, mutex disinda kullanmak guvenli degil.
+  struct Target { String device; int relay; };
+  static Target targets[MAX_DEVICES * MAX_RELAYS];
+  int targetCount = 0;
+  for (JsonObject t : WEATHER_CONFIG_DOC["targets"].as<JsonArray>()) {
+    if (targetCount >= MAX_DEVICES * MAX_RELAYS) break;
+    String dev = t["device"] | String("");
+    int relay = t["relay"] | 0;
+    if (dev.length() && relay >= 1 && relay <= MAX_RELAYS) {
+      targets[targetCount].device = dev;
+      targets[targetCount].relay = relay;
+      targetCount++;
+    }
+  }
 
   xSemaphoreGive(weatherMutex);  // Her durumda serbest bırak
 
   // Gece: otomasyon kontrolu birakir (gece aydinlatmayi gunbatimi/zamanlayici
   // yonetir); ertesi sabah geceden kalan bir durumu "geri alma"ya kalkmasin
-  if (!isDaytime) { lastWeatherDesired = ""; return; }
-  if (deviceName == "" || relayId < 1 || relayId > MAX_RELAYS) return;
-
-  String ip = "";
-  for (JsonObject device : doc.as<JsonArray>()) {
-    if ((device["name"] | String("")) == deviceName) {
-      ip = device["ip"] | String("");
-      break;
-    }
+  if (!isDaytime) {
+    for (int i = 0; i < MAX_DEVICES; i++)
+      for (int r = 0; r < MAX_RELAYS; r++) lastWeatherDesired[i][r] = "";
+    return;
   }
-  if (ip == "") return;
+  if (targetCount == 0) return;
 
   // Karanlik mi? Gercek isik (gunes isinimi W/m2) varsa onunla, yoksa eski
   // bulut skoruyla. Eskiden %100 bulut/yagmur kodu = "karanlik" sayiliyordu;
@@ -73,27 +85,47 @@ void weatherControlLogic(int currentMinute) {
     bright = !dark;
   }
 
-  if (dark) {
-    if (lastWeatherDesired == action) return;  // bu donem icin zaten gonderildi
-    bool ok = sendControlSignal(ip, relayId, action == "ON" ? "on" : "off", "bulut");
-    addEvent(deviceName, relayId, action == "ON", "bulut", ok);
-    lastWeatherDesired = action;
-    lastWeatherControlAction = millis();
-    setForceRefresh();
-    return;
-  }
+  for (int ti = 0; ti < targetCount; ti++) {
+    const String& deviceName = targets[ti].device;
+    int relayId = targets[ti].relay;
 
-  // Aydinlandi: beklemeden geri al - ama sadece BIZIM yaptigimizi, ve bu arada
-  // web'den elle mudahale edildiyse dokunma. Histerezis bandindaysa bekle.
-  if (!bright || lastWeatherDesired != action) return;
+    int devIdx = -1;
+    String ip = "";
+    int idx = 0;
+    for (JsonObject device : doc.as<JsonArray>()) {
+      if (idx >= MAX_DEVICES) break;
+      if ((device["name"] | String("")) == deviceName) {
+        devIdx = idx;
+        ip = device["ip"] | String("");
+        break;
+      }
+      idx++;
+    }
+    if (devIdx < 0 || ip == "") continue;
+    int r = relayId - 1;
 
-  if (lastManualControlAction <= lastWeatherControlAction) {
-    bool revertOn = (action != "ON");
-    bool ok = sendControlSignal(ip, relayId, revertOn ? "on" : "off", "bulut-geri");
-    addEvent(deviceName, relayId, revertOn, "bulut-geri", ok);
-    setForceRefresh();
+    if (dark) {
+      if (lastWeatherDesired[devIdx][r] == action) continue;  // bu donem icin zaten gonderildi
+      bool ok = sendControlSignal(ip, relayId, action == "ON" ? "on" : "off", "bulut");
+      addEvent(deviceName, relayId, action == "ON", "bulut", ok);
+      lastWeatherDesired[devIdx][r] = action;
+      lastWeatherControlAction = millis();
+      setForceRefresh();
+      continue;
+    }
+
+    // Aydinlandi: beklemeden geri al - ama sadece BIZIM yaptigimizi, ve bu
+    // arada web'den elle mudahale edildiyse dokunma. Histerezis bandindaysa bekle.
+    if (!bright || lastWeatherDesired[devIdx][r] != action) continue;
+
+    if (lastManualControlAction <= lastWeatherControlAction) {
+      bool revertOn = (action != "ON");
+      bool ok = sendControlSignal(ip, relayId, revertOn ? "on" : "off", "bulut-geri");
+      addEvent(deviceName, relayId, revertOn, "bulut-geri", ok);
+      setForceRefresh();
+    }
+    lastWeatherDesired[devIdx][r] = "";
   }
-  lastWeatherDesired = "";
 }
 
 // ============== handleSunSchedule ==============

@@ -1581,8 +1581,24 @@ function renderWeather() {
             <!-- Ayarlar Formu - her alan degisince otomatik kaydedilir -->
             <table id="weatherForm" onchange="autoSaveWeather()">
                 <tr><td>Aktif:</td><td><input type="checkbox" id="w_active" ${c.active?'checked':''}></td></tr>
-                <tr><td>Cihaz:</td><td><select id="w_dev">${(c.device_name && !DEVICES.some(d=>d.name===c.device_name)) ? `<option value="${c.device_name}" selected>⚠ ${c.device_name} (listede yok - otomasyon çalışmaz)</option>` : ''}${DEVICES.map(d=>`<option value="${d.name}" ${c.device_name===d.name?'selected':''}>${d.name}</option>`).join('')}</select></td></tr>
-                <tr><td>Röle:</td><td><select id="w_rel"><option value="1" ${c.relay_id==1?'selected':''}>Röle 1</option><option value="2" ${c.relay_id==2?'selected':''}>Röle 2</option></select></td></tr>
+                <tr><td>Cihaz/Röle:</td><td>${(() => {
+                    const targets = Array.isArray(c.targets) ? c.targets : [];
+                    const isChecked = (name, r) => targets.some(t => t.device === name && t.relay === r);
+                    let rows = DEVICES.map(d => `
+                        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">
+                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="1" ${isChecked(d.name,1)?'checked':''}> ${escHtml(d.name)} R1
+                        </label>
+                        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px">
+                            <input type="checkbox" class="w_target" data-device="${escHtml(d.name)}" data-relay="2" ${isChecked(d.name,2)?'checked':''}> ${escHtml(d.name)} R2
+                        </label>`).join('');
+                    const ghosts = targets.filter(t => !DEVICES.some(d => d.name === t.device));
+                    ghosts.forEach(t => {
+                        rows += `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;color:#cf6679">
+                            <input type="checkbox" class="w_target" data-device="${escHtml(t.device)}" data-relay="${t.relay}" checked> ⚠ ${escHtml(t.device)} R${t.relay} (listede yok)
+                        </label>`;
+                    });
+                    return `<div style="display:flex;flex-wrap:wrap;gap:6px">${rows}</div>`;
+                })()}</td></tr>
                 <tr><td>İşlem:</td><td><select id="w_act"><option value="ON" ${c.action=='ON'?'selected':''}>AÇ</option><option value="OFF" ${c.action=='OFF'?'selected':''}>KAPAT</option></select></td></tr>
                 <tr><td>Aydınlık eşiği (%):</td><td><input type="number" min="1" max="100" step="1" id="w_light" value="${ltPct}"> <small style="color:#888">şu an: %${radPct ?? '-'} · altına düşünce yanar</small></td></tr>
                 <tr><td>Rüzgar Eşiği (Km/s):</td><td><input type="number" step="0.1" id="w_wind_threshold" placeholder="15.0" value="${c.wind_threshold||'15.0'}"></td></tr>
@@ -1609,10 +1625,13 @@ function autoSaveWeather() {
 
 function saveWeather() {
     const addrBefore = [WEATHER_CONFIG.city || "", WEATHER_CONFIG.district || "", WEATHER_CONFIG.neighbourhood || ""].join("|");
+    const targets = Array.from(document.querySelectorAll('.w_target:checked')).map(el => ({
+        device: el.dataset.device,
+        relay: parseInt(el.dataset.relay)
+    }));
     const cfg = {
         active: document.getElementById('w_active').checked,
-        device_name: document.getElementById('w_dev').value,
-        relay_id: parseInt(document.getElementById('w_rel').value),
+        targets: targets,
         threshold: WEATHER_CONFIG.threshold || 3,  // isinim verisi yoksa yedek (eski bulut skoru)
         light_threshold: Math.round((parseInt(document.getElementById('w_light').value) || 9) * 7),  // % -> W/m2
         action: document.getElementById('w_act').value,

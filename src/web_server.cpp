@@ -274,7 +274,7 @@ void handleGetWeatherConfig(AsyncWebServerRequest *request) {
 // DEGISTI: govde artik AsyncWebServer'in onBody callback'inden geliyor,
 // bu yuzden JSON dogrudan parametre olarak aliniyor (server.arg("plain") yok).
 void applyWeatherConfig(AsyncWebServerRequest *request, const String& body) {
-  DynamicJsonDocument inDoc(1024);
+  DynamicJsonDocument inDoc(1536);  // "targets" dizisi coklu secimle buyuyebiliyor
   DeserializationError err = deserializeJson(inDoc, body);
   if (err) {
     request->send(400, "text/plain", "HATA");
@@ -310,19 +310,22 @@ void applyWeatherConfig(AsyncWebServerRequest *request, const String& body) {
       configChanged = true;
     }
 
+    // targets dizisi degisti mi (siralamaya duyarli string karsilastirma -
+    // web tarafi hep ayni sirada gonderiyor, yeterli ve basit)
+    String newTargets, oldTargets;
+    serializeJson(inDoc["targets"].as<JsonArray>(), newTargets);
+    serializeJson(WEATHER_CONFIG_DOC["targets"].as<JsonArray>(), oldTargets);
+
     // Diğer ayar değişim kontrolü
     // NOT: sol taraf da "| varsayilan" ile okunuyor - ArduinoJson v7'de ham
     // MemberProxy'yi cast'siz != ile karsilastirmak private kopya ctor hatasi veriyordu.
-    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || (inDoc["device_name"] | "") != (WEATHER_CONFIG_DOC["device_name"] | "") || (inDoc["relay_id"] | 0) != (WEATHER_CONFIG_DOC["relay_id"] | 0) || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["start_time"] | "") != (WEATHER_CONFIG_DOC["start_time"] | "") || (inDoc["end_time"] | "") != (WEATHER_CONFIG_DOC["end_time"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f) || (inDoc["light_threshold"] | 60) != (WEATHER_CONFIG_DOC["light_threshold"] | 60)) {
+    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || newTargets != oldTargets || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f) || (inDoc["light_threshold"] | 60) != (WEATHER_CONFIG_DOC["light_threshold"] | 60)) {
       configChanged = true;
       WEATHER_CONFIG_DOC["active"] = inDoc["active"];
-      WEATHER_CONFIG_DOC["device_name"] = inDoc["device_name"];
-      WEATHER_CONFIG_DOC["relay_id"] = inDoc["relay_id"];
+      WEATHER_CONFIG_DOC["targets"].set(inDoc["targets"]);
       WEATHER_CONFIG_DOC["threshold"] = inDoc["threshold"];
       WEATHER_CONFIG_DOC["light_threshold"] = inDoc["light_threshold"] | 60;
       WEATHER_CONFIG_DOC["action"] = inDoc["action"];
-      WEATHER_CONFIG_DOC["start_time"] = inDoc["start_time"];
-      WEATHER_CONFIG_DOC["end_time"] = inDoc["end_time"];
       WEATHER_CONFIG_DOC["wind_threshold"] = inDoc["wind_threshold"];  // Rüzgar eşiği kaydedildi
     }
 

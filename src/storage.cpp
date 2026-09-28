@@ -180,8 +180,20 @@ void loadWeatherConfig() {
   }
 
   if (!WEATHER_CONFIG_DOC.containsKey("active")) WEATHER_CONFIG_DOC["active"] = false;
-  if (!WEATHER_CONFIG_DOC.containsKey("device_name")) WEATHER_CONFIG_DOC["device_name"] = "Yok";
-  if (!WEATHER_CONFIG_DOC.containsKey("relay_id")) WEATHER_CONFIG_DOC["relay_id"] = 0;
+  // GOC (2026-09-28): tek cihaz/role (device_name+relay_id) -> coklu hedef listesi
+  // ("targets": [{device,relay},...]). Web arayuzu artik dropdown degil tikli
+  // kutular - ayni otomasyona birden fazla lamba baglanabiliyor.
+  if (!WEATHER_CONFIG_DOC.containsKey("targets")) {
+    JsonArray targets = WEATHER_CONFIG_DOC["targets"].to<JsonArray>();
+    String oldDevice = WEATHER_CONFIG_DOC["device_name"] | "";
+    int oldRelay = WEATHER_CONFIG_DOC["relay_id"] | 0;
+    if (oldDevice.length() && oldDevice != "Yok" && oldRelay >= 1 && oldRelay <= MAX_RELAYS) {
+      JsonObject t = targets.add<JsonObject>();
+      t["device"] = oldDevice;
+      t["relay"] = oldRelay;
+    }
+    needSave = true;
+  }
   if (!WEATHER_CONFIG_DOC.containsKey("threshold")) WEATHER_CONFIG_DOC["threshold"] = 3;
   // Isik esigi (W/m2): isinim bunun altina dusunce ac. Olcum 2026-09-28: yagmurlu
   // kapali 11:30'da 88 W/m2 ("cok karanlik degil"), acik ogle ~600-700.

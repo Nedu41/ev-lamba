@@ -17,13 +17,13 @@ String sunriseAction[MAX_DEVICES][MAX_RELAYS];
 String sunsetAction[MAX_DEVICES][MAX_RELAYS];
 
 StaticJsonDocument<2048> CURRENT_WEATHER_DOC;
-StaticJsonDocument<512> WEATHER_CONFIG_DOC;
+StaticJsonDocument<1024> WEATHER_CONFIG_DOC;
 SemaphoreHandle_t weatherMutex = nullptr;
 volatile bool weatherRefreshRequested = false;
 
 unsigned long lastManualControlAction = 0;
 unsigned long lastWeatherControlAction = 0;
-String lastWeatherDesired = "";
+String lastWeatherDesired[MAX_DEVICES][MAX_RELAYS];
 
 volatile bool weatherDisplayDirty = true;
 String NEWS_TICKER_TEXT = "";

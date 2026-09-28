@@ -29,7 +29,8 @@ extern String sunsetAction[MAX_DEVICES][MAX_RELAYS];
 
 // Hava durumu verisi + ayarlari
 extern StaticJsonDocument<2048> CURRENT_WEATHER_DOC;
-extern StaticJsonDocument<512> WEATHER_CONFIG_DOC;
+// 512 -> 1024: "targets" (coklu cihaz+role secimi) dizisi ekstra yer istiyor
+extern StaticJsonDocument<1024> WEATHER_CONFIG_DOC;
 extern SemaphoreHandle_t weatherMutex;
 // Web handler'i blocking HTTPS yapmasin diye yenilemeyi hava gorevine devreder
 extern volatile bool weatherRefreshRequested;
@@ -37,7 +38,8 @@ extern volatile bool weatherRefreshRequested;
 // Otomasyon durumu
 extern unsigned long lastManualControlAction;
 extern unsigned long lastWeatherControlAction;
-extern String lastWeatherDesired;
+// [cihaz index][role-1] -> son gonderilen "ON"/"OFF"/"" (bkz. sunriseAction)
+extern String lastWeatherDesired[MAX_DEVICES][MAX_RELAYS];
 
 // Ekran/haber
 extern volatile bool weatherDisplayDirty;
