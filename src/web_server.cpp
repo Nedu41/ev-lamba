@@ -233,7 +233,7 @@ void handleProxy(AsyncWebServerRequest *request) {
   
   if (http.begin(fullUrl)) {
     int code = http.GET();
-    String resp = (code > 0) ? http.getString() : "ERROR";
+    String resp = (code > 0) ? readBodyWithTimeout(http, 2000) : "ERROR";
 
     Serial.printf("Proxy response code: %d\n", code);
     Serial.printf("Response length: %d\n", resp.length());
@@ -529,7 +529,7 @@ void proxyWorkerTask(void *pvParameters) {
           http.setConnectTimeout(1500);
           if (http.begin("http://" + ip.toString() + "/mac")) {
             if (http.GET() == 200) {
-              mac = http.getString();
+              mac = readBodyWithTimeout(http, 1500);
               mac.trim();
             }
             http.end();

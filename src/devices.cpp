@@ -6,6 +6,36 @@
 #include "storage.h"
 #include "web_server.h"
 
+// ============== Sure sinirli govde okuma ==============
+// BUGFIX (2026-09-29): durum gorevi 2 saattir donmustu - .140 cevap ortasinda
+// fisten cekilince getString() icindeki zaman asimisiz dongude takildi, butun
+// cihazlar son gorulen halde (ON/cevrimici) kaldi.
+String readBodyWithTimeout(HTTPClient& http, uint32_t timeoutMs) {
+  String body;
+  WiFiClient* stream = http.getStreamPtr();
+  if (!stream) return body;
+  int remaining = http.getSize();  // -1: Content-Length yok, baglanti kapanana kadar oku
+  if (remaining > 0) body.reserve(remaining);
+  unsigned long start = millis();
+  while (remaining != 0 && millis() - start < timeoutMs) {
+    int avail = stream->available();
+    if (avail > 0) {
+      while (avail-- > 0 && remaining != 0) {
+        int c = stream->read();
+        if (c < 0) break;
+        body += (char)c;
+        if (remaining > 0) remaining--;
+      }
+    } else if (!stream->connected()) {
+      break;
+    } else {
+      delay(1);
+    }
+  }
+  if (remaining > 0) Serial.printf("[HTTP] govde eksik/zaman asimi (%d bayt kaldi)\n", remaining);
+  return body;
+}
+
 // ============== Device status via HTTP ==============
 // DÜZELTİLDİ: HTTP nesneleri scope'da düzgün kapatılıyor, timeout artırıldı
 String getDeviceStatusJson(const String& ip) {
@@ -26,7 +56,7 @@ String getDeviceStatusJson(const String& ip) {
     if (http.begin(url)) {
       int code = http.GET();
       if (code == 200) {
-        result = http.getString();
+        result = readBodyWithTimeout(http, 1500);
       } else {
         http.end();
         return "{\"r1_state\":\"OFFLINE\",\"r2_state\":\"OFFLINE\",\"mac\":\"OFFLINE\"}";
@@ -46,7 +76,7 @@ String getDeviceStatusJson(const String& ip) {
     if (httpMac.begin(macUrl)) {
       int macCode = httpMac.GET();
       if (macCode == 200) {
-        macId = httpMac.getString();
+        macId = readBodyWithTimeout(httpMac, 1000);
         macId.trim();
         if (macId.length() > 17) macId = macId.substring(0, 17);
       }

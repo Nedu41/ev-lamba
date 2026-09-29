@@ -7,6 +7,12 @@ String getDeviceStatusJson(const String& ip);
 // ESP01 v2.5+ bunu kendi MQTT olayina da yazar
 bool sendControlSignal(const String& ip, int relay, const String& action, const String& src);
 
+// HTTP cevap govdesini sure sinirli okur. HTTPClient::getString() govdeyi
+// zaman asimisiz bir dongude bekliyor: cihazin gucu cevap ortasinda kesilirse
+// (FIN/RST gelmez, connected() true kalir) cagiran gorev sonsuza kadar takilir.
+class HTTPClient;
+String readBodyWithTimeout(HTTPClient& http, uint32_t timeoutMs);
+
 // MAC'i "bcff4d403e0f" bicimine getirir; gecersizse ""
 String normMac(const String& raw);
 
