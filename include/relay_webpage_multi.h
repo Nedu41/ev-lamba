@@ -1176,6 +1176,9 @@ function renderSettings() {
                         <div class="rssi-value-compact ${getRSSIClass(rssi)}" id="rssi_${i}">${formatRSSI(rssi)}</div>
                         <button class="mini-btn" onclick="refreshRSSI(${i})">🔄</button>
                     </div>
+                    <div class="dev-card-row"><span>MQTT</span>
+                        ${mqttRow(i, status, online)}
+                    </div>
                     <div class="dev-card-row"><span>Özellik</span>
                         <div class="feat-icons">${featIcons(d) || '<small style="color:#666">yok</small>'}</div>
                     </div>
@@ -1195,6 +1198,46 @@ function renderSettings() {
 
         document.getElementById("content").innerHTML = html;
     });
+}
+
+// MQTT (genel broker uzerinden disaridan kontrol) - cihaz basina ac/kapat.
+// Nokta = broker baglantisi (yesil bagli, kirmizi degil); kapaliyken gri.
+function mqttRow(i, status, online) {
+    if (!online) return '<small style="color:#666">çevrimdışı</small>';
+    if (typeof status.mqtt_enabled !== 'boolean')
+        return '<small style="color:#888">firmware eski (v2.6 gerekli)</small>';
+    const on = status.mqtt_enabled, conn = !!status.mqtt_connected;
+    const dot = !on ? 'background:#555' : conn ? 'background:#4CAF50;box-shadow:0 0 5px #4CAF50' : 'background:#cf6679;box-shadow:0 0 5px #cf6679';
+    const title = !on ? "kapalı" : conn ? "broker'a bağlı" : "broker'a bağlı değil";
+    return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" ${on ? 'checked' : ''} onchange="setDeviceMqtt(${i}, this)"> uzaktan kontrol
+            </label>
+            <span class="status-dot" style="${dot}" title="${title}"></span>`;
+}
+
+function setDeviceMqtt(i, cb) {
+    const d = DEVICES[i];
+    const want = cb.checked;
+    if (!want && !confirm(`${d.name}: MQTT kapatılsın mı?
+Cihaz genel broker'dan ayrılır, MQTT uygulamasıyla dışarıdan kontrol edilemez.
+Web/Tailscale ile kontrol devam eder.`)) {
+        cb.checked = true;
+        return;
+    }
+    cb.disabled = true;
+    fetch(`/proxy?ip=${encodeURIComponent(d.ip)}&url=${encodeURIComponent('/mqtt?enable=' + (want ? 1 : 0))}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(j => {
+            if (j.mqtt_enabled !== want) throw new Error();
+            if (STATUS[d.name]) STATUS[d.name].mqtt_enabled = want;
+            toast(`✓ ${d.name}: MQTT ${want ? 'açıldı' : 'kapatıldı'}`);
+            setTimeout(() => fetchStatus().then(() => { if (location.pathname === '/settings') renderSettings(); }), want ? 6000 : 1500);
+        })
+        .catch(() => {
+            cb.checked = !want;
+            toast(`✗ ${d.name}: MQTT ayarı değiştirilemedi (çevrimdışı ya da firmware eski)`, true);
+        })
+        .finally(() => { cb.disabled = false; });
 }
 
 // RSSI Yenileme
