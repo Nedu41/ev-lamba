@@ -452,24 +452,24 @@ static void mixRGB(const RGB a, const RGB b, float f, RGB out) {
 // daha kizil/mor (toz, nem), sabah daha pembe-altin.
 static const float SKY_E[10] = {-18, -12, -7, -3, 0, 3, 8, 15, 30, 50};
 static const RGB SKY_AM[10][4] = {
-  {{0,0,0},{0,0,4},{2,3,12},{6,9,24}},             // gece
-  {{1,2,12},{4,7,26},{10,14,44},{22,26,66}},       // astronomik tan
+  {{0,0,0},{0,0,0},{0,0,2},{1,2,6}},               // gece: siyah
+  {{0,0,2},{1,2,8},{4,6,20},{14,14,38}},           // astronomik tan
   {{6,12,44},{22,30,80},{60,55,110},{120,80,120}}, // tan agarmasi (mor)
-  {{18,34,96},{60,70,140},{170,110,130},{245,140,95}},
-  {{32,60,140},{95,110,175},{235,150,120},{255,170,80}},  // gundogumu
-  {{40,85,170},{95,135,205},{215,175,150},{255,195,120}},
+  {{16,26,84},{80,60,130},{220,80,85},{255,105,50}},    // safak kizilligi
+  {{30,50,130},{150,90,140},{255,110,70},{255,125,35}},  // gundogumu
+  {{40,80,165},{120,125,190},{250,145,90},{255,165,60}},
   {{35,90,180},{70,130,210},{140,175,220},{220,210,190}},  // altin saat sonu
   {{28,85,185},{55,120,210},{100,160,230},{175,205,235}},
   {{20,75,178},{42,108,202},{78,148,226},{150,195,240}},
   {{14,64,170},{34,98,198},{68,138,224},{140,190,242}},    // ogle
 };
 static const RGB SKY_PM[10][4] = {
-  {{0,0,0},{0,0,4},{2,3,12},{6,9,24}},
-  {{1,2,10},{5,6,24},{14,12,40},{28,20,52}},
-  {{8,10,40},{30,22,70},{90,40,90},{150,60,70}},   // alacakaranlik (mor-kizil)
-  {{20,24,80},{80,45,110},{200,70,80},{250,110,50}},
-  {{35,50,120},{130,75,130},{245,105,70},{255,140,40}},   // gunbatimi
-  {{40,75,160},{120,110,165},{240,150,100},{255,175,70}},
+  {{0,0,0},{0,0,0},{0,0,2},{1,2,6}},
+  {{0,0,2},{2,2,8},{8,4,18},{22,8,20}},
+  {{6,6,34},{40,18,62},{130,30,60},{190,40,30}},   // alacakaranlik (mor-kizil)
+  {{20,20,72},{120,40,90},{240,55,45},{255,75,20}},
+  {{40,45,110},{170,65,105},{255,80,40},{255,100,20}},    // gunbatimi
+  {{40,75,160},{140,100,160},{255,120,70},{255,145,45}},
   {{35,90,180},{70,130,210},{140,175,220},{220,210,190}},
   {{28,85,185},{55,120,210},{100,160,230},{175,205,235}},
   {{20,75,178},{42,108,202},{78,148,226},{150,195,240}},
@@ -487,7 +487,7 @@ static void skyAt(float e, bool evening, RGB out[4]) {
 // Gunes rengi: ufukta kizil-turuncu, yukseldikce sari-beyaz
 static void sunColorAt(float e, RGB out) {
   static const float E[6] = {-2, 0, 3, 8, 20, 40};
-  static const RGB C[6] = {{255,70,40},{255,95,40},{255,140,50},{255,190,80},{255,225,120},{255,242,175}};
+  static const RGB C[6] = {{255,50,25},{255,80,30},{255,130,45},{255,190,80},{255,225,120},{255,242,175}};
   int i = 0;
   while (i < 4 && e >= E[i + 1]) i++;
   mixRGB(C[i], C[i + 1], (e - E[i]) / (E[i + 1] - E[i]), out);
@@ -518,7 +518,7 @@ static void setOpenSkyPalette(Scene sc, const SkyTime& st) {
 
   // Zemin (tepeler): gunduz koyu yesil, alacakaranlikta siyaha yakin siluet
   float light = constrain((st.elev + 4) / 16.0f, 0.0f, 1.0f);
-  static const RGB GROUND_D = {30, 56, 40}, GROUND_N = {3, 4, 8};
+  static const RGB GROUND_D = {14, 32, 20}, GROUND_N = {16, 18, 30};
   RGB g;
   mixRGB(GROUND_N, GROUND_D, light, g);
   scene.setPaletteColor(P_BG, tft.color565(g[0], g[1], g[2]));
@@ -545,7 +545,7 @@ static void setOpenSkyPalette(Scene sc, const SkyTime& st) {
   } else {
     // Acik gece: sicak renkli yildizlar + Samanyolu/ay haresi
     scene.setPaletteColor(P_CLOUD_L, tft.color565(255, 222, 170));
-    scene.setPaletteColor(P_CLOUD_D, tft.color565(34, 38, 62));
+    scene.setPaletteColor(P_CLOUD_D, tft.color565(48, 52, 84));
   }
   scene.setPaletteColor(P_PRECIP, tft.color565(165, 190, 255));  // yagis yok: mavi yildizlar
   scene.setPaletteColor(P_FLASH, tft.color565(165, 163, 148));    // ay denizleri
@@ -689,7 +689,7 @@ static void initScene(Scene sc, bool day) {
 
   for (int i = 0; i < STAR_COUNT; i++) {
     stars[i].x = (int16_t)frand(2, SCENE_W - 2);
-    stars[i].y = (int16_t)frand(2, HORIZON_Y - 6);
+    stars[i].y = (int16_t)frand(2, HORIZON_Y - 42);  // daglarin ustundeki gok
     stars[i].ph = (uint8_t)frand(0, 50);
   }
   // Samanyolu: sol alttan sag uste capraz, ortasi yogun bir serit
@@ -702,9 +702,9 @@ static void initScene(Scene sc, bool day) {
   // Daglar: sinus toplamlari - her acilista ayni manzara. Uzak sira sivri
   // tepeli (|sin| ile), yakin sira yuvarlak ve alcak.
   for (int x = 0; x < SCENE_W; x++) {
-    hillH[x] = (int8_t)(6 + 6 * sinf(x * 0.021f + 1.3f) + 3.5f * sinf(x * 0.057f + 0.4f) + 1.5f * sinf(x * 0.13f));
-    float peaks = 14 * (1 - fabsf(sinf(x * 0.018f + 0.6f))) + 7 * (1 - fabsf(sinf(x * 0.047f + 2.1f)));
-    farH[x] = (int8_t)(8 + peaks + 1.5f * sinf(x * 0.21f));
+    hillH[x] = (int8_t)(9 + 7 * sinf(x * 0.021f + 1.3f) + 4 * sinf(x * 0.057f + 0.4f) + 1.5f * sinf(x * 0.13f));
+    float peaks = 18 * (1 - fabsf(sinf(x * 0.018f + 0.6f))) + 9 * (1 - fabsf(sinf(x * 0.047f + 2.1f)));
+    farH[x] = (int8_t)(12 + peaks + 1.5f * sinf(x * 0.21f));
   }
   nextStrikeMs = millis() + 1500;
   strikeEndMs = 0;
@@ -742,7 +742,7 @@ static void drawHills() {
   for (int x = 0; x < SCENE_W; x++) {
     int top = HORIZON_Y - farH[x];
     for (int y = top; y < HORIZON_Y; y++)
-      if (((x + y) & 1) == 0 || y == top) scene.drawPixel(x, y, P_BG);
+      if (((x + y) & 3) != 0 || y <= top + 1) scene.drawPixel(x, y, P_BG);
   }
   for (int x = 0; x < SCENE_W; x++) {
     int top = HORIZON_Y - hillH[x];
@@ -892,9 +892,9 @@ static void drawStars(bool colored, float elev) {
   int tier = elev < -12 ? 3 : elev < -8 ? 2 : elev < -4 ? 1 : 0;
   if (!tier) return;
   for (int i = 0; i < STAR_COUNT; i++) {
-    int mag = (i % 9 == 0) ? 1 : (i % 3 == 0) ? 2 : 3;  // 1 = en parlak
+    int mag = (i % 5 == 0) ? 1 : (i % 2 == 0) ? 2 : 3;  // 1 = en parlak
     if (mag > tier) continue;
-    bool on = ((frameNo + stars[i].ph) % 50) < 40;       // titresim
+    bool on = ((frameNo + stars[i].ph) % 50) < 44;       // titresim
     uint8_t col;
     if (mag == 1) col = on ? P_WHITE : P_GRAY;
     else if (mag == 2) {
@@ -1274,7 +1274,7 @@ void displayTask(void* pvParameters) {
     }
 
     if (animated) {
-      Scene sc = wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
+      Scene sc = skyDemoMin >= 0 ? SC_CLEAR : wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
       static uint32_t lastPalette = 0;
       if (skyDemoReq) {
         skyDemoReq = false;
