@@ -742,10 +742,10 @@ static void drawSky() {
   }
 }
 
-static void drawHills() {
-  // Uzak daglar: ayni renk ama %50 noktali -> havanin arkasinda soluk kalir
-  // (hava perspektifi), yakin sira onun onunde tam koyu
-  for (int x = 0; x < SCENE_W; x++) {
+static void drawHills(bool farVisible) {
+  // Uzak daglar: ayni renk ama noktali -> havanin arkasinda soluk kalir
+  // (hava perspektifi), yakin sira onun onunde tam koyu. Siste uzak sira yok.
+  for (int x = 0; x < SCENE_W && farVisible; x++) {
     int top = HORIZON_Y - farH[x];
     for (int y = top; y < HORIZON_Y; y++)
       if (((x + y) & 3) != 0 || y <= top + 1) scene.drawPixel(x, y, P_BG);
@@ -883,6 +883,19 @@ static void drawMoon(int cx, int cy, float phase) {
   };
   crater(-4, 16);
   crater(-9, -2);
+  // Soluk kucuk kraterler (sadece aydinlik tarafta): halka ya da tek nokta
+  static const int8_t CRATERS[][3] = {
+    {6, -15, 1}, {-13, -11, 1}, {11, 13, 2}, {-17, 9, 1}, {16, -3, 1}, {3, 15, 1}, {-5, 3, 1}, {-15, -4, 2}
+  };
+  for (auto& k : CRATERS) {
+    int dx = k[0], dy = k[1];
+    float w = sqrtf((float)(R * R - dy * dy));
+    float term = w * c;
+    bool lit = waxing ? (dx >= term + 1 && dx < w - 1) : (dx > -w + 1 && dx < -term - 1);
+    if (!lit) continue;
+    if (k[2] >= 2) scene.drawCircle(cx + dx, cy + dy, 2, P_FLASH);
+    else scene.drawPixel(cx + dx, cy + dy, P_FLASH);
+  }
 }
 
 // Bulutlarin arkasindaki soluk gunes (isinsiz disk)
@@ -1005,11 +1018,23 @@ static void updateLightning(uint32_t now) {
   }
 }
 
+// Sis: yere yakin yogun, yukari seyrelen, yavasca suruklenen dalgali perdeler.
+// Yogunluk 4px'lik hucrelerde iki sinus dalgasinin toplami; hucre ici Bayer
+// desenli noktalarla (dithering) cizilir - duz cizgiler yerine yumusak pus.
 static void drawFog(float t) {
-  for (int y = 4; y < SCENE_H; y += 6) {
-    int off = (int)(t * (8 + (y % 12))) % 40;
-    for (int x = -40 + off; x < SCENE_W; x += 40) {
-      scene.drawFastHLine(x, y, 26, ((y / 6) % 2) ? P_CLOUD_L : P_CLOUD_D);
+  const int TOP = 30, CELL = 4;
+  for (int y = TOP; y < SCENE_H; y++) {
+    float base = (y - TOP) / (float)(SCENE_H - TOP);  // 0 ust, 1 yer
+    const uint8_t* row = BAYER4[y & 3];
+    for (int cx = 0; cx < SCENE_W; cx += CELL) {
+      float w = 0.5f * sinf(cx * 0.015f + t * 0.22f + y * 0.045f)
+              + 0.3f * sinf(cx * 0.037f - t * 0.15f + y * 0.021f);
+      float d = base * 0.8f + w * 0.3f;
+      int th = (int)(constrain(d, 0.0f, 1.0f) * 16);
+      if (th <= 0) continue;
+      uint8_t col = d > 0.55f ? P_CLOUD_L : P_CLOUD_D;  // yogun yerde acik, seyrekte ince doku
+      for (int x = cx; x < cx + CELL; x++)
+        if (row[x & 3] < th) scene.drawPixel(x, y, col);
     }
   }
 }
@@ -1033,7 +1058,8 @@ static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   // bulutlu ciselemede bile soluk gunes gorunuyordu (2026-09-28 gozlemlendi,
   // canli kod 55). Simdi TUM yagisli/sisli sahnelerde gok cismi gizli.
   // Gunes/ay gun icinde yay cizerek hareket eder, tepelerin arkasina batar.
-  if (!precip) {
+  // Siste gok cismi pusun arkasindan soluk disk olarak secilir (sis ustten cizilir)
+  if (!precip || sc == SC_FOG) {
     int x, y;
     if (sunUp) {
       sunPos(st, x, y);
@@ -1042,7 +1068,7 @@ static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
     }
     if (elev < 0 && moonPos(st, moonPhase(), x, y)) drawMoon(x, y, moonPhase());
   }
-  drawHills();
+  drawHills(sc != SC_FOG);
   if (sc == SC_FOG) drawFog(t);
   updateClouds(dt);
   if (sc == SC_THUNDER) updateLightning(now);
