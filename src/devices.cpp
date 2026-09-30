@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
+#include <WiFiUdp.h>
 #include <map>
 #include "app_state.h"
 #include "storage.h"
@@ -53,7 +54,7 @@ String getDeviceStatusJson(const String& ip) {
     HTTPClient http;
     http.setTimeout(800);
     http.setConnectTimeout(800);
-    String url = "http://" + ip + "/status";
+    String url = "http://" + ip + "/status?hub=1";  // v2.8+: cihaz push'u bu IP'ye yollar
     if (http.begin(url)) {
       int code = http.GET();
       if (code == 200) {
@@ -155,8 +156,57 @@ static bool followIpChanges() {
   return changed;
 }
 
+// ============== Durum push (ESP01 firmware v2.8+) ==============
+// Cihaz role/zamanlama degisince ve 30sn'de bir /status JSON'unu yerel aga UDP
+// yayini olarak atar. Push'u taze olan cihaz HTTP ile yoklanmaz; susarsa
+// (eski firmware, cihaz kapali) yoklama kaldigi yerden devam eder.
+// Paketler yalnizca durum gorevinde islenir - cihaz listesine ayni gorevden erisilsin.
+static WiFiUDP pushRx;
+static std::map<String, unsigned long> lastPushAt;  // cihaz adi -> millis
+const unsigned long PUSH_FRESH_MS = 45000;          // 30sn nabiz + 1 kayip paket payi
+
+static bool pushFresh(const String& name) {
+  auto it = lastPushAt.find(name);
+  return it != lastPushAt.end() && millis() - it->second < PUSH_FRESH_MS;
+}
+
+// Bekleyen push paketlerini isler; durum degistiyse true. listChanged: IP guncellendi.
+static bool handleStatusPushes(bool& listChanged) {
+  bool updated = false;
+  static char buf[1024];
+  while (pushRx.parsePacket() > 0) {
+    int len = pushRx.read(buf, sizeof(buf) - 1);
+    if (len <= 0) continue;
+    buf[len] = 0;
+    JsonDocument tempDoc;
+    if (deserializeJson(tempDoc, buf) != DeserializationError::Ok) continue;
+    String mac = normMac(tempDoc["mac"] | "");
+    if (!mac.length() || !doc.is<JsonArray>()) continue;
+    String srcIp = pushRx.remoteIP().toString();
+    for (JsonObject device : doc.as<JsonArray>()) {
+      if ((device["mac"] | String("")) != mac) continue;  // listede olmayan cihaz yoksayilir
+      String name = device["name"] | "";
+      if (!name.length()) break;
+      if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
+        CURRENT_STATUS_DOC[name].set(tempDoc);
+        xSemaphoreGive(statusMutex);
+      }
+      lastPushAt[name] = millis();
+      if ((device["ip"] | String("")) != srcIp) {  // DHCP ile IP degismis
+        Serial.printf("[Push] %s IP degisti: %s -> %s\n", name.c_str(), device["ip"] | "", srcIp.c_str());
+        device["ip"] = srcIp;
+        listChanged = true;
+      }
+      updated = true;
+      break;
+    }
+  }
+  return updated;
+}
+
 // ============== Tasks ==============
 void updateAllDeviceStatuses(void* pvParameters) {
+  pushRx.begin(STATUS_PUSH_PORT);
   unsigned long lastFollow = 0;
   const unsigned long FOLLOW_INTERVAL = 60000;  // cevrimdisi cihaz varken en fazla dakikada 1 tarama
   // Ust uste 2 tur cevap vermeyen cihaz sadece 3 turda bir yoklanir: her
@@ -174,6 +224,7 @@ void updateAllDeviceStatuses(void* pvParameters) {
         String name = device["name"] | "";
         String ip   = device["ip"]   | "";
         if (name != "" && ip != "") {
+          if (pushFresh(name)) continue;  // durum zaten push ile guncel
           uint8_t& misses = offlineRounds[ip];
           if (misses >= 2 && round % 3 != 0) {
             anyOffline = true;  // son bilinen OFFLINE durumu yerinde kalir
@@ -182,6 +233,9 @@ void updateAllDeviceStatuses(void* pvParameters) {
           String statusJson = getDeviceStatusJson(ip);
           bool offline = statusJson.indexOf("\"OFFLINE\"") >= 0;
           misses = offline ? (misses < 255 ? misses + 1 : misses) : 0;
+          // Tek cevapsiz yoklama cihazi kopuk gostermesin (zayif sinyalde ara sira
+          // zaman asimi oluyor, cihaz aslinda bagli) - son bilinen durum kalir.
+          if (offline && misses == 1) continue;
           StaticJsonDocument<512> tempDoc;  // DÜZELTİLDİ: 1500 yerine 512 (ESP01 yanıtı küçük)
           if (deserializeJson(tempDoc, statusJson) == DeserializationError::Ok) {
             if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
@@ -221,6 +275,9 @@ void updateAllDeviceStatuses(void* pvParameters) {
         clearForceRefresh();  // DÜZELTİLDİ: inline fonksiyon ile güvenli temizleme
         break;
       }
+      bool ipChanged = false;
+      if (handleStatusPushes(ipChanged)) wsBroadcastStatus();  // push aninda ekrana
+      if (ipChanged) persistDevices();
       vTaskDelay(pdMS_TO_TICKS(100));
     }
   }

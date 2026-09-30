@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Web arayuzu basliginda ve TFT ust seridinde gosterilir - tek kaynak burasi
-#define FW_VERSION "6.3.8"
+#define FW_VERSION "6.4.0"
 
 // ---- Donanim ----
 #define BACKLIGHT_PIN 21
@@ -15,6 +15,7 @@
 #define MUTEX_TIMEOUT pdMS_TO_TICKS(100)
 const int STATUS_CHECK_INTERVAL = 10000;           // cihaz durum turu
 const int HTTP_TIMEOUT_MS = 1000;                  // ESP01 kontrol istegi
+const uint16_t STATUS_PUSH_PORT = 4211;             // ESP01 v2.8 UDP durum push (firmware ile ayni)
 const unsigned long DEBOUNCE_DELAY_MS = 600000;    // manuel kontrolden sonra otomasyon beklemesi
 const unsigned long NEWS_UPDATE_INTERVAL = 900000; // 15 dk
 // Anadolu Ajansi dunya haberleri: ~15-22KB, yonlendirme yok, duz <title> (2026-09-27 dogrulandi)

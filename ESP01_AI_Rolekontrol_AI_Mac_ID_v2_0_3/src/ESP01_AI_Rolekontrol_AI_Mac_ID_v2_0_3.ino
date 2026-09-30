@@ -1,7 +1,7 @@
 /*
  * ============================================================
  *  ESP01 Röle Kontrol Firmware
- *  Versiyon : v2.7.0  (bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
+ *  Versiyon : v2.8.0  (UDP durum push; bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
  *  Tarih     : Şubat 2026
  * ============================================================
  *
@@ -123,7 +123,7 @@ typedef ESP8266WebServer WebServerT;
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 
-#define FW_VERSION "2.7.0"  // /status "fw" alani
+#define FW_VERSION "2.8.0"  // /status "fw" alani
 
 // Varsayilan WiFi (sifre koda gomulmesin diye ayri dosyada, paylasilmaz)
 #if __has_include("secrets.h")
@@ -186,6 +186,14 @@ String topicEvent;   // v2.5: her role degisimi + sebebi (HUB olay kaydi icin)
 // ---------------------- DİĞER AYARLAR ----------------------
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 3 * 3600, 60000);
+
+// v2.8: durum push - HUB'daki STATUS_PUSH_PORT ile ayni olmali
+#define STATUS_PUSH_PORT     4211
+#define STATUS_PUSH_INTERVAL 30000
+WiFiUDP pushUdp;
+IPAddress hubIp;  // bilinmiyorsa (0.0.0.0) push yerel aga yayin olarak gider
+volatile bool pushPending = true;  // acilista hemen bildir
+unsigned long lastStatusPush = 0;
 
 #define RELAY_ON HIGH
 #define RELAY_OFF LOW
@@ -354,7 +362,8 @@ void setRelayState(uint8_t relayId, bool state) {
     
     // EEPROM'a her zaman yaz (durum aynı olsa bile garantilemek için)
     saveRelayState(relayId, state);
-    
+    pushPending = true;  // HUB'a loop'ta bildirilir (v2.8)
+
     // MQTT state topic'e yayınla
     if (mqttClient.connected()) {
         String stateTopic = (relayId == 1) ? topicStateR1 : topicStateR2;
@@ -485,10 +494,11 @@ void handleSave() {
     // Yeni programi yeniden baz al: kaydetme aninda roleyi degistirme, sadece
     // bir sonraki baslangic/bitis aninda islem yap
     if (id == 1 || id == 2) lastWindowState[id] = -1;
+    pushPending = true;
     server.send(200, "text/plain", "OK");
 }
 
-void handleStatus() {
+String buildStatusJson() {
     StaticJsonDocument<512> doc;
     
     unsigned long currentEpoch = getReliableEpochTime();
@@ -544,7 +554,27 @@ void handleStatus() {
     
     String output;
     serializeJson(doc, output);
-    server.send(200, "application/json", output);
+    return output;
+}
+
+void handleStatus() {
+    // HUB yoklarken ?hub=1 ekler - push'lar bundan sonra ona dogrudan gider
+    if (server.hasArg("hub")) hubIp = server.client().remoteIP();
+    server.send(200, "application/json", buildStatusJson());
+}
+
+// v2.8: durum push (Sonoff tarzi). Role/zamanlama degisince ve 30sn'de bir
+// /status JSON'u yerel aga UDP yayini olarak gider; HUB beklemeden gunceller,
+// push'u gelen cihazi HTTP ile yoklamaz. Broker/HUB IP ayari gerekmez.
+void sendStatusPush() {
+    if (WiFi.status() != WL_CONNECTED) return;
+    String json = buildStatusJson();
+    // Tekil adres: WiFi katmani ACK + yeniden deneme yapar. Broadcast'te ikisi de
+    // yok - zayif sinyalde (-80 dBm) paketler sessizce kayboluyordu.
+    IPAddress dst = ((uint32_t)hubIp != 0) ? hubIp : WiFi.broadcastIP();
+    pushUdp.beginPacket(dst, STATUS_PUSH_PORT);
+    pushUdp.write((const uint8_t*)json.c_str(), json.length());
+    pushUdp.endPacket();
 }
 
 // ---------------------- MQTT FONKSİYONLARI ----------------------
@@ -901,7 +931,7 @@ void setupWiFiEvents() {
         wifiLastReason = info.wifi_sta_disconnected.reason;
         if (wifiUp) { wifiUp = false; wifiDrops++; }
     }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-    WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { wifiUp = true; },
+    WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { wifiUp = true; pushPending = true; },
                  ARDUINO_EVENT_WIFI_STA_GOT_IP);
 }
 #else
@@ -913,7 +943,7 @@ void setupWiFiEvents() {
             if (wifiUp) { wifiUp = false; wifiDrops++; }
         });
     wifiGotIpHandler = WiFi.onStationModeGotIP(
-        [](const WiFiEventStationModeGotIP&) { wifiUp = true; });
+        [](const WiFiEventStationModeGotIP&) { wifiUp = true; pushPending = true; });
 }
 #endif
 
@@ -1126,6 +1156,14 @@ void loop() {
         lastStatusPublish = now;
         publishStatus();
     }
-    
+
+    // v2.8: HUB'a durum push - degisiklikte hemen, yoksa 30sn'de bir (canlilik)
+    if (WiFi.status() == WL_CONNECTED &&
+        (pushPending || now - lastStatusPush > STATUS_PUSH_INTERVAL)) {
+        pushPending = false;
+        lastStatusPush = now;
+        sendStatusPush();
+    }
+
     yield();  // WDT besleme ve WiFi stack için
 }
