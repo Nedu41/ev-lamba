@@ -303,12 +303,13 @@ static void drawMiniIcon(TFT_eSPI& g, int cx, int cy, int code, bool past, const
 
 static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   // Sicaklik (etiket yerine hava aciklamasi: "Kapali", "Yagmurlu"...)
-  g.fillRoundRect(6, oy + 6, 150, 80, 7, c.panel);
+  // Sicaklik/ruzgar kutulari seffaf: dolgu yok, yazilar zeminsiz (arkadaki
+  // canli sahne gorunur) - sadece cerceve kaliyor
   g.drawRoundRect(6, oy + 6, 150, 80, 7, c.orange);
   const char* desc = !wv.loaded ? "Bekleniyor..." : !wv.ok ? "Veri alinamadi" : weatherText(wv.code);
-  g.setTextColor(wv.loaded && !wv.ok ? c.red : c.white, c.panel);
+  g.setTextColor(wv.loaded && !wv.ok ? c.red : c.white);
   g.drawString(fitText(desc, 136, 2), 14, oy + 10, 2);
-  g.setTextColor(c.orange, c.panel);
+  g.setTextColor(c.orange);
   if (wv.ok) {
     String t = bigValue(wv.temp, 104);
     g.drawString(t, 12, oy + 30, 7);
@@ -321,17 +322,16 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
   }
 
   // Ruzgar
-  g.fillRoundRect(164, oy + 6, 150, 80, 7, c.panel);
   g.drawRoundRect(164, oy + 6, 150, 80, 7, c.cyan);
-  g.setTextColor(c.gray, c.panel);
+  g.setTextColor(c.gray);
   g.drawString("RUZGAR", 172, oy + 10, 2);
-  g.setTextColor(c.cyan, c.panel);
+  g.setTextColor(c.cyan);
   if (wv.ok) {
     g.setTextDatum(TR_DATUM);
-    g.setTextColor(c.white, c.panel);
+    g.setTextColor(c.white);
     g.drawString(trAscii(wv.dir), 306, oy + 10, 2);
     g.setTextDatum(TL_DATUM);
-    g.setTextColor(c.cyan, c.panel);
+    g.setTextColor(c.cyan);
     String v = bigValue(wv.wind, 100);
     g.drawString(v, 170, oy + 30, 7);
     g.drawString("km/s", 170 + g.textWidth(v, 7) + 4, oy + 62, 2);
@@ -339,11 +339,10 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
     g.drawString("--", 170, oy + 30, 7);
   }
 
-  // Alt bilgi: 7 gunluk tahmin ikonlari (dun, BUGUN, +5 gun) - ince serit,
-  // arka plandaki animasyonu fazla kapatmasin
+  // Alt bilgi: 7 gunluk tahmin ikonlari (dun, BUGUN, +5 gun) - seffaf serit
+  // (dolgu yok), arkadaki animasyon gorunur
   if (!wv.ok || wv.fcN == 0) return;
   const int py = oy + 134, ph = 46;
-  g.fillRoundRect(6, py, 308, ph, 7, c.panel);
   g.drawRoundRect(6, py, 308, ph, 7, c.gray);
 
   static const char* DAYS[7] = {"Pz", "Pt", "Sa", "Ca", "Pe", "Cu", "Ct"};
@@ -356,9 +355,9 @@ static void drawPanels(TFT_eSPI& g, int oy, const PanelColors& c) {
     bool today = (i == 1), past = (i == 0);
     if (today) g.drawRoundRect(cx - colW / 2 + 1, py + 2, colW - 2, ph - 4, 5, c.orange);
     uint16_t txt = today ? c.orange : past ? c.gray : c.white;
-    g.setTextColor(txt, c.panel);
+    g.setTextColor(txt);
     g.drawString(todayW < 0 ? "--" : (today ? "BUGUN" : DAYS[(todayW + i + 6) % 7]), cx, py + 4, 1);
-    g.setTextColor(past ? c.gray : c.cyan, c.panel);
+    g.setTextColor(past ? c.gray : c.cyan);
     g.drawString(String(wv.fcMax[i]) + "/" + String(wv.fcMin[i]), cx, py + 14, 1);
     drawMiniIcon(g, cx, py + 33, wv.fcCode[i], past, c);
   }

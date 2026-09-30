@@ -168,6 +168,7 @@ static bool followIpChanges() {
 // Paketler yalnizca durum gorevinde islenir - cihaz listesine ayni gorevden erisilsin.
 static WiFiUDP pushRx;
 static std::map<String, unsigned long> lastPushAt;  // cihaz adi -> millis
+static unsigned long lastAnyPush = 0;               // herhangi bir cihazdan son push
 const unsigned long PUSH_FRESH_MS = 35000;          // 15sn nabiz (v2.9) + 1 kayip paket payi
 
 static bool pushFresh(const String& name) {
@@ -183,6 +184,7 @@ static bool handleStatusPushes(bool& listChanged) {
     int len = pushRx.read(buf, sizeof(buf) - 1);
     if (len <= 0) continue;
     buf[len] = 0;
+    lastAnyPush = millis();
     JsonDocument tempDoc;
     if (deserializeJson(tempDoc, buf) != DeserializationError::Ok) continue;
     String mac = normMac(tempDoc["mac"] | "");
@@ -225,6 +227,25 @@ static bool handleStatusPushes(bool& listChanged) {
     }
   }
   return updated;
+}
+
+// "Zombi" WiFi: WiFi.status() CONNECTED diyor ama trafik gecmiyor (2026-09-30
+// seri logda goruldu - DNS hatalari, ping yok, HUB dakikalarca agdan dusuk;
+// loop()'taki status kontrolu bunu yakalamiyor). Cihazlar 15sn'de bir push
+// attigi icin 90sn hic paket gelmemesi yerel agin olu oldugunun isareti.
+// Butun cihazlar gercekten kapaliysa yeniden baglanma zararsiz; 5dk'da bir sinirli.
+static void checkZombieWiFi() {
+  static unsigned long lastKick = 0;
+  const unsigned long SILENCE_MS = 90000, KICK_EVERY_MS = 300000;
+  if (WiFi.status() != WL_CONNECTED || lastAnyPush == 0) return;  // hic push gormediysek (eski firmware) dokunma
+  if (millis() - lastAnyPush < SILENCE_MS) return;
+  if (lastKick != 0 && millis() - lastKick < KICK_EVERY_MS) return;
+  lastKick = millis();
+  Serial.printf("[WiFi] %lus'dir hic cihaz push'u yok - baglanti zombi olabilir, yeniden baglaniliyor\n",
+                (millis() - lastAnyPush) / 1000);
+  WiFi.disconnect(false);
+  vTaskDelay(pdMS_TO_TICKS(200));
+  WiFi.reconnect();
 }
 
 // ============== Tasks ==============
@@ -302,6 +323,8 @@ void updateAllDeviceStatuses(void* pvParameters) {
       }
       bool ipChanged = false;
       if (handleStatusPushes(ipChanged)) wsBroadcastStatus();  // push aninda ekrana
+      checkZombieWiFi();
+      wsFlushPending();  // birlestirilip ertelenmis yayin varsa gonder
       if (ipChanged) persistDevices();
       vTaskDelay(pdMS_TO_TICKS(100));
     }

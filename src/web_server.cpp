@@ -16,6 +16,8 @@
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
+void wsSafeText(AsyncWebSocketClient* c, const String& payload);  // bellek yetmezse cokmeden atlar
+void wsSafeTextAll(const String& payload);
 
 // ===== ASYNC PROXY WORKER (blocking HTTPClient cagrilarini paylasilan
 // AsyncTCP task'indan ayirmak icin) =====
@@ -436,7 +438,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
     Serial.printf("[WS] Istemci #%u baglandi\n", client->id());
-    client->text(buildStatusPayload());  // ilk anlik goruntu
+    wsSafeText(client, buildStatusPayload());  // ilk anlik goruntu
   } else if (type == WS_EVT_DISCONNECT) {
     Serial.printf("[WS] Istemci #%u ayrildi\n", client->id());
   } else if (type == WS_EVT_DATA) {
@@ -512,7 +514,7 @@ void proxyWorkerTask(void *pvParameters) {
       String payload;
       serializeJson(out, payload);
       AsyncWebSocketClient *c = ws.client(job.wsClientId);
-      if (c && c->status() == WS_CONNECTED) c->text(payload);
+      if (c && c->status() == WS_CONNECTED) wsSafeText(c, payload);
 
       if (ok) wsBroadcastStatus();  // diger acik ekranlar (telefon/PC) da aninda gorsun
       setForceRefresh();  // updateAllDeviceStatuses'i hemen uyandirir -> WS "status" push
@@ -577,13 +579,62 @@ void proxyWorkerTask(void *pvParameters) {
       String payload;
       serializeJson(result, payload);
       AsyncWebSocketClient *c = ws.client(job.wsClientId);
-      if (c && c->status() == WS_CONNECTED) c->text(payload);
+      if (c && c->status() == WS_CONNECTED) wsSafeText(c, payload);
     }
   }
 }
 
+// BUGFIX (2026-09-30): push'la birlikte yayin sikligi saniyede birkaca cikti;
+// yavas okuyan istemci kuyrugunda ~8KB'lik mesajlar birikince textAll()'in
+// make_shared'i bellek bulamayip istisna atti -> abort(), HUB dakikada bir
+// yeniden basliyordu (seri log backtrace ile dogrulandi). Uc onlem:
+//  - yayinlar birlestirilir: en fazla WS_MIN_INTERVAL_MS'de bir (arada gelen
+//    istekler wsFlushPending() ile sonradan tek yayin olarak gider)
+//  - yeterli bitisik bellek yoksa yayin atlanir (sonraki tur zaten gelecek)
+//  - istemci basina kuyruk 4 mesajla sinirli (platformio.ini
+//    WS_MAX_QUEUED_MESSAGES) - dolarsa baglanti kapanir, tarayici 2sn'de
+//    yeniden baglanip guncel goruntuyu alir
+static const unsigned long WS_MIN_INTERVAL_MS = 500;
+static volatile bool wsPending = false;
+
+// Kontrol ile ayirma arasinda baska gorev (HTTPS hava/haber istegi TLS icin
+// ~40KB) bellegi alabiliyor - kutuphanenin make_shared'i o an std::bad_alloc
+// atinca yakalanmazsa abort(). Yakala, bu yayini atla; sonraki zaten gelecek.
+void wsSafeTextAll(const String& payload) {
+  try {
+    ws.textAll(payload);
+  } catch (const std::exception&) {
+    Serial.printf("[WS] bellek yetmedi (en buyuk blok %u), yayin atlandi\n", ESP.getMaxAllocHeap());
+  }
+}
+
+void wsSafeText(AsyncWebSocketClient* c, const String& payload) {
+  try {
+    c->text(payload);
+  } catch (const std::exception&) {
+    Serial.printf("[WS] bellek yetmedi (en buyuk blok %u), mesaj atlandi\n", ESP.getMaxAllocHeap());
+  }
+}
+static volatile unsigned long wsLastSent = 0;
+
 void wsBroadcastStatus() {
-  ws.textAll(buildStatusPayload());
+  if (millis() - wsLastSent < WS_MIN_INTERVAL_MS) {
+    wsPending = true;
+    return;
+  }
+  wsLastSent = millis();
+  wsPending = false;
+  if (ws.count() == 0) return;
+  String payload = buildStatusPayload();
+  if (ESP.getMaxAllocHeap() < payload.length() + 8192) {
+    Serial.printf("[WS] bellek dar (en buyuk blok %u), yayin atlandi\n", ESP.getMaxAllocHeap());
+    return;
+  }
+  wsSafeTextAll(payload);
+}
+
+void wsFlushPending() {
+  if (wsPending && millis() - wsLastSent >= WS_MIN_INTERVAL_MS) wsBroadcastStatus();
 }
 
 void setupWebServer() {
