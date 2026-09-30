@@ -1,7 +1,7 @@
 /*
  * ============================================================
  *  ESP01 Röle Kontrol Firmware
- *  Versiyon : v2.8.0  (UDP durum push; bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
+ *  Versiyon : v2.8.1  (saat EEPROM kaydi saatte bir; UDP durum push; bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
  *  Tarih     : Şubat 2026
  * ============================================================
  *
@@ -123,7 +123,7 @@ typedef ESP8266WebServer WebServerT;
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 
-#define FW_VERSION "2.8.0"  // /status "fw" alani
+#define FW_VERSION "2.8.1"  // /status "fw" alani
 
 // Varsayilan WiFi (sifre koda gomulmesin diye ayri dosyada, paylasilmaz)
 #if __has_include("secrets.h")
@@ -1145,8 +1145,12 @@ void loop() {
     if (now - lastScheduleCheck > 60000) {
         lastScheduleCheck = now;
         checkSchedule();
-        
-        if (getReliableEpochTime() > 0) {
+
+        // v2.8.1: dakikada bir degil saatte bir - EEPROM aslinda flash, her
+        // commit bir sektor silme dongusu harciyor (dakikada 1 = ~525 bin/yil)
+        static uint8_t minutesSinceTimeSave = 0;
+        if (++minutesSinceTimeSave >= 60 && getReliableEpochTime() > 0) {
+            minutesSinceTimeSave = 0;
             saveLastKnownTime();
         }
     }
