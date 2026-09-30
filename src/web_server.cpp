@@ -13,6 +13,7 @@
 #include "events.h"
 #include "display.h"
 #include "wifi_nets.h"
+#include "alerts.h"
 #include "relay_webpage_multi.h"
 
 static volatile unsigned long restartAt = 0;  // 0 = yok; webLoop() zamani gelince yeniden baslatir
@@ -443,6 +444,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
   if (type == WS_EVT_CONNECT) {
     Serial.printf("[WS] Istemci #%u baglandi\n", client->id());
     wsSafeText(client, buildStatusPayload());  // ilk anlik goruntu
+    wsSafeText(client, alertsJson());          // aktif uyarilar
   } else if (type == WS_EVT_DISCONNECT) {
     Serial.printf("[WS] Istemci #%u ayrildi\n", client->id());
   } else if (type == WS_EVT_DATA) {
@@ -600,6 +602,7 @@ void proxyWorkerTask(void *pvParameters) {
 //    yeniden baglanip guncel goruntuyu alir
 static const unsigned long WS_MIN_INTERVAL_MS = 500;
 static volatile bool wsPending = false;
+static volatile unsigned long alertDemoOff = 0;  // /alert_demo: 0 = demo yok, degilse kapanma zamani
 
 // Kontrol ile ayirma arasinda baska gorev (HTTPS hava/haber istegi TLS icin
 // ~40KB) bellegi alabiliyor - kutuphanenin make_shared'i o an std::bad_alloc
@@ -651,6 +654,30 @@ void setupWebServer() {
   // gönderiyor, durum güncellemeleri de 2sn'lik polling yerine push ediliyor
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+
+  // Uyarilar (hava/deprem): onay + teshis + deneme
+  server.on("/alert_ack", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("id")) { request->send(400, "text/plain", "id yok"); return; }
+    bool ok = alertsAck(request->getParam("id")->value());
+    request->send(200, "text/plain", ok ? "OK" : "YOK");
+  });
+  server.on("/alerts", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", alertsJson());
+  });
+  // Uyari demosu: ornek uyarilar 20 sn gorunur, sonra webLoop kaldirir
+  server.on("/alert_demo", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    alertsDemo(true);
+    alertDemoOff = millis() + 20000UL;
+    request->send(200, "text/plain", "OK");
+  });
+  // Deneme: /alert_test?kind=eq|wx (onaylayinca gider)
+  server.on("/alert_test", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    bool eq = request->hasParam("kind") && request->getParam("kind")->value() == "eq";
+    String id = "test:" + String(millis());
+    if (eq) alertsRaise(id, 1, "YAKIN DEPREM M4.2 (TEST)", "Örnek Şehir - 12 km - 30.09 14:20");
+    else alertsRaise(id, 0, "HAVA UYARISI - YARIN (TEST)", "rüzgar 62 km/s, yağış 30 mm");
+    request->send(200, "text/plain", "OK");
+  });
 
   // HTTP rotaları
   server.on("/", AsyncWebRequestMethod::HTTP_GET, handleRoot);
@@ -794,6 +821,17 @@ void webLoop() {
   if (millis() - lastWsCleanup > 5000) {
     lastWsCleanup = millis();
     ws.cleanupClients();
+  }
+  if (alertDemoOff && (long)(millis() - alertDemoOff) >= 0) {
+    alertDemoOff = 0;
+    alertsDemo(false);
+  }
+  // Uyari listesi degisti -> acik ekranlara (telefon/PC) anlik yayin
+  static uint32_t lastAlertVer = 0;
+  uint32_t av = alertsVersion();
+  if (av != lastAlertVer) {
+    lastAlertVer = av;
+    if (ws.count()) wsSafeTextAll(alertsJson());
   }
   // Ertelenmis yeniden baslatma: HTTP cevabi istemciye ulassin diye
   if (restartAt && (long)(millis() - restartAt) >= 0) {

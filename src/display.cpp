@@ -7,6 +7,7 @@
 #include <functional>
 #include "app_state.h"
 #include "weather.h"
+#include "alerts.h"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite scene = TFT_eSprite(&tft);   // canli hava arka plani (4-bit paletli)
@@ -208,12 +209,27 @@ void drawClock(bool force) {
   tft.setTextDatum(TL_DATUM);
 }
 
+// Aktif uyari varsa ust seridin sol tarafi (konum) kirmizi kalin uyari metnine doner.
+// Bos = uyari yok. Sadece displayTask yazar/okur.
+static String hdrAlert;
+static void drawHeaderLeft() {
+  tft.fillRect(0, 0, 166, HEADER_H - 1, COL_HEADER);
+  tft.setTextDatum(TL_DATUM);
+  if (hdrAlert.length()) {
+    String s = fitText(hdrAlert, 154, 2);
+    tft.setTextColor(0xF800, COL_HEADER);  // saf kirmizi (COL_RED soluk pembe)
+    tft.drawString(s, 8, 7, 2);
+    tft.drawString(s, 9, 7, 2);  // 1px kaydirip tekrar: sahte kalin
+  } else {
+    tft.setTextColor(COL_CYAN, COL_HEADER);
+    tft.drawString(fitText(wv.city.length() ? shortLocation(wv.city) : "Merkezi HUB", 155, 2), 8, 7, 2);
+  }
+}
+
 static void drawHeader() {
   tft.fillRect(0, 0, 320, HEADER_H, COL_HEADER);
   tft.drawFastHLine(0, HEADER_H - 1, 320, COL_CYAN);
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(COL_CYAN, COL_HEADER);
-  tft.drawString(fitText(wv.city.length() ? shortLocation(wv.city) : "Merkezi HUB", 155, 2), 8, 7, 2);
+  drawHeaderLeft();
   // Surum: kucuk ama okunur (GLCD 6x8), tarihin altinda
   tft.setTextDatum(TR_DATUM);
   tft.setTextColor(COL_GRAY, COL_HEADER);
@@ -1089,11 +1105,13 @@ static float tickerX = TICKER_W;     // o karakterin x konumu (baslangicta sagda
 static void tickerStep(float dt) {
   // Yeni tur basliyorsa en guncel haber metnini al
   if (tickerStart == 0 && tickerX >= TICKER_W) {
+    // Aktif uyarilar (son 60 dk) haberin onune eklenir
+    String pre = trAscii(alertsTickerText());
     if (xSemaphoreTake(newsMutex, MUTEX_TIMEOUT) == pdTRUE) {
-      tickerText = NEWS_TICKER_TEXT;
+      tickerText = pre + NEWS_TICKER_TEXT;
       xSemaphoreGive(newsMutex);
     }
-    if (!tickerText.length()) tickerText = "Haberler yukleniyor...";
+    if (!tickerText.length()) tickerText = pre + "Haberler yukleniyor...";
   }
 
   tickerX -= TICKER_SPEED * dt;  // zamana bagli: kare hizi degisse de ayni hiz
@@ -1229,6 +1247,54 @@ static bool withTlsSpritesFreed(std::function<bool()> fn, const char* tag, bool*
   return ok;
 }
 
+// ============== Uyari banner'i (hava/deprem) ==============
+// Sahne sprite'ina (palet indeksi) ya da yedek statik ekrana (565 renk) cizilir.
+// Kirmizi <-> koyu zemin arasinda yanip soner; beyaz yazi ikisinde de okunur.
+// Sicaklik/ruzgar kutularinin (y 6..86) hemen altindan baslar, haftalik tahmin
+// seridini (y 134..180) tamamen kapatir.
+static const int BANNER_Y = 90;
+static const int BANNER_H = 90;
+
+// Metni maxW'ye sigacak sekilde en fazla 2 satira boler (kelime sinirindan)
+static void wrapTwo(const String& s, int maxW, int font, String& l1, String& l2) {
+  if (tft.textWidth(s, font) <= maxW) { l1 = s; l2 = ""; return; }
+  int cut = s.length();
+  while (cut > 1 && tft.textWidth(s.substring(0, cut), font) > maxW) cut--;
+  int sp = s.lastIndexOf(' ', cut);
+  if (sp > 0) cut = sp;
+  l1 = s.substring(0, cut);
+  l2 = s.substring(cut);
+  l2.trim();
+  l2 = fitText(l2, maxW, font);
+}
+
+static void drawAlertBanner(TFT_eSPI& g, int oy, bool sprite, const Alert& a, int idx, int n) {
+  bool flip = (millis() / 600) & 1;
+  uint16_t bg = sprite ? (flip ? P_RED : P_PANEL) : (flip ? 0xF800 : COL_CARD);
+  uint16_t fg = sprite ? P_WHITE : TFT_WHITE;
+  uint16_t edge = sprite ? P_ORANGE : COL_ORANGE;
+  uint16_t dim = sprite ? P_GRAY : COL_GRAY;
+  int y = oy + BANNER_Y;
+  g.fillRect(0, y, 320, BANNER_H, bg);
+  g.drawRect(0, y, 320, BANNER_H, edge);
+  g.drawRect(1, y + 1, 318, BANNER_H - 2, edge);
+  g.setTextDatum(TL_DATUM);
+  g.setTextColor(fg, bg);
+  g.drawString(fitText(trAscii(a.title), n > 1 ? 250 : 300, 4), 8, y + 8, 4);
+  String l1, l2;
+  wrapTwo(trAscii(a.detail), 304, 2, l1, l2);
+  g.drawString(l1, 8, y + 42, 2);
+  if (l2.length()) g.drawString(l2, 8, y + 60, 2);
+  g.setTextColor(dim, bg);
+  g.drawString("Onay: HUB web sayfasi", 8, y + 78, 1);
+  if (n > 1) {
+    g.setTextColor(fg, bg);
+    g.setTextDatum(TR_DATUM);
+    g.drawString(String(idx + 1) + "/" + String(n), 312, y + 12, 2);
+    g.setTextDatum(TL_DATUM);
+  }
+}
+
 // ============== Ekran gorevi (TFT'nin tek sahibi) ==============
 void displayTask(void* pvParameters) {
   // Acilis ekranlarindan kalan setTextSize(2/3) sonraki tum font cizimlerini
@@ -1251,6 +1317,12 @@ void displayTask(void* pvParameters) {
   uint32_t last = millis();
   float t = 0;
 
+  // Uyari durumu (alerts.cpp) - her karede String kopyalamamak icin surume gore onbellek
+  Alert view[6];
+  int viewN = 0, viewIdx = 0, lastIdx = -1;
+  uint32_t viewVer = 0, lastBannerDraw = 0;
+  bool bannerShown = false;
+
   for (;;) {
     uint32_t now = millis();
     float dt = (now - last) / 1000.0f;
@@ -1271,6 +1343,31 @@ void displayTask(void* pvParameters) {
       }
     }
     drawClock(false);
+
+    // Uyarilar: liste degisince/dondurulen uyari degisince ust seridi guncelle
+    if (alertsVersion() != viewVer) {
+      viewVer = alertsVersion();
+      viewN = alertsSnapshot(view, 6);
+      lastIdx = -1;
+    }
+    viewIdx = viewN ? (now / 4000) % viewN : 0;
+    if (viewIdx != lastIdx) {
+      lastIdx = viewIdx;
+      hdrAlert = viewN ? trAscii(view[viewIdx].title) : String("");
+      drawHeaderLeft();
+    }
+    if (!animated) {
+      if (viewN) {
+        if (now - lastBannerDraw >= 600) {
+          lastBannerDraw = now;
+          bannerShown = true;
+          drawAlertBanner(tft, SCENE_Y, false, view[viewIdx], viewIdx, viewN);
+        }
+      } else if (bannerShown) {
+        bannerShown = false;
+        weatherDisplayDirty = true;  // paneller banner'in altini sildi - yeniden ciz
+      }
+    }
 
     // Haber (HTTPS/TLS, AA RSS). BUGFIX (2026-09-28): TLS handshake tek parca
     // ~35-45KB bellek istiyor; sahne+ticker sprite'lari acikken en buyuk bos
@@ -1305,6 +1402,19 @@ void displayTask(void* pvParameters) {
       }
     }
 
+    // Deprem sorgusu (AFAD, HTTPS/TLS) - hava/haber ile ayni nedenle burada.
+    // Ilk sorgu acilistan ~60sn sonra (haber+hava ile ust uste binmesin).
+    {
+      static unsigned long lastEq = 0;
+      static bool eqOk = false, spriteOk = true, firstRun = true;
+      if (firstRun) { firstRun = false; lastEq = now - (ALERT_EQ_INTERVAL_MS - 60000UL); }
+      unsigned long interval = (eqOk && spriteOk) ? ALERT_EQ_INTERVAL_MS : 120000UL;
+      if (now - lastEq >= interval) {
+        lastEq = now;
+        eqOk = withTlsSpritesFreed([]() { return fetchEarthquakes(); }, "deprem", &spriteOk);
+      }
+    }
+
     if (animated) {
       // Hava demosu: tum hava tipleri sirayla (gercek saatin gokyuzuyle)
       static const Scene WX_SEQ[] = {SC_CLEAR, SC_PARTLY, SC_CLOUDY, SC_FOG, SC_DRIZZLE, SC_RAIN, SC_SNOW, SC_THUNDER};
@@ -1319,6 +1429,12 @@ void displayTask(void* pvParameters) {
       if (wxDemoIdx >= 0) {
         wxDemoIdx = (now - wxDemoStart) / WX_STEP_MS;
         if (wxDemoIdx >= WX_N) wxDemoIdx = -1;
+      }
+      // Demonun son adiminda (Firtina) ornek uyari banner'i/ust serit/alt yazi gorunsun
+      {
+        static bool demoAlertOn = false;
+        bool want = (wxDemoIdx == WX_N - 1);
+        if (want != demoAlertOn) { demoAlertOn = want; alertsDemo(want); }
       }
       Scene sc = wxDemoIdx >= 0 ? WX_SEQ[wxDemoIdx]
                : skyDemoMin >= 0 ? SC_CLEAR : wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
@@ -1364,6 +1480,7 @@ void displayTask(void* pvParameters) {
         scene.drawString(dm, SCENE_W - 8, WIN_TOP + 2, 2);
         scene.setTextDatum(TL_DATUM);
       }
+      if (viewN) drawAlertBanner(scene, 0, true, view[viewIdx], viewIdx, viewN);
       scene.pushSprite(0, SCENE_Y);
     }
 

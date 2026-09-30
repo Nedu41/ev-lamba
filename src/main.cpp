@@ -44,6 +44,7 @@
 #include "telegram.h"
 #include "events.h"
 #include "wifi_nets.h"
+#include "alerts.h"
 
 void setup() {
   Serial.begin(115200);
@@ -68,6 +69,7 @@ void setup() {
     }
   }
 
+  alertsInit();
   loadDevices();
   loadWeatherConfig();
 loadScheduleConfig();  // YENİ

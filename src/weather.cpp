@@ -5,6 +5,7 @@
 #include "app_state.h"
 #include "storage.h"
 #include "telegram.h"  // urlEncode
+#include "alerts.h"
 
 // =================== Nominatim geocode ===================
 bool geocodeAddress(const String& address, String& outLat, String& outLon, String& displayName) {
@@ -58,7 +59,7 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
   // Saatlik ruzgar alanlari da kaldirildi: ruzgar current blogundan geliyor.
   // Bulut/nem artik "current" blogundan - saatlik dizi 7 gunde bellege sigmiyordu.
   // Gunluk: past_days=1 + forecast_days=6 -> 7 gun, indeks 1 = bugun (ekranda 2. sira).
-  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset" + "&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_direction_10m,weather_code,is_day,shortwave_radiation&timezone=auto&past_days=1&forecast_days=6&models=ecmwf_ifs025";
+  String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,wind_gusts_10m_max,precipitation_sum" + "&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,wind_direction_10m,weather_code,is_day,shortwave_radiation&timezone=auto&past_days=1&forecast_days=6&models=ecmwf_ifs025";
 
   Serial.printf("DEBUG: Open-Meteo URL: %s\n", url.c_str());
 
@@ -128,6 +129,13 @@ bool fetchOpenMeteo(const String& lat, const String& lon, JsonObject& out, Dynam
     d.add(dCode[i] | -1);
     d.add((int)roundf(dMax[i] | 0.0f));
     d.add((int)roundf(dMin[i] | 0.0f));
+  }
+
+  // Firtina/ruzgar/yagis uyarilari (bugun + yarin) - bkz. alerts.cpp
+  if (scratch["daily"]["wind_gusts_10m_max"].is<JsonArray>()) {
+    alertsEvaluateWeather(scratch["daily"]["time"].as<JsonArray>(), dCode,
+                          scratch["daily"]["wind_gusts_10m_max"].as<JsonArray>(),
+                          scratch["daily"]["precipitation_sum"].as<JsonArray>());
   }
 
   // Gün doğumu ve batımı (bugun = indeks 1, past_days=1 yuzunden)

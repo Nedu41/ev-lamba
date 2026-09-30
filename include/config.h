@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Web arayuzu basliginda ve TFT ust seridinde gosterilir - tek kaynak burasi
-#define FW_VERSION "6.7.3"
+#define FW_VERSION "6.8.0"
 
 // ---- Donanim ----
 #define BACKLIGHT_PIN 21
@@ -21,6 +21,17 @@ const unsigned long NEWS_UPDATE_INTERVAL = 900000; // 15 dk
 // Anadolu Ajansi dunya haberleri: ~15-22KB, yonlendirme yok, duz <title> (2026-09-27 dogrulandi)
 #define NEWS_RSS_URL "https://www.aa.com.tr/tr/rss/default?cat=dunya"
 const int NEWS_MAX_ITEMS = 6;
+
+// ---- Uyarilar (hava + deprem, bkz. alerts.cpp) ----
+#define ALERT_WIND_KMH 50            // gunluk max ruzgar hamlesi esigi (km/s)
+#define ALERT_RAIN_MM 25             // gunluk toplam yagis esigi (mm)
+#define ALERT_EQ_NEAR_KM 100         // "yakin" deprem yaricapi (km)
+#define ALERT_EQ_NEAR_MAG 3.5f       // yakin: bu buyukluk ve ustu
+#define ALERT_EQ_FAR_MAG 5.0f        // Turkiye geneli: bu buyukluk ve ustu
+#define ALERT_EQ_WINDOW_H 12         // AFAD'dan son kac saatlik kayit sorgulansin
+const unsigned long ALERT_EQ_INTERVAL_MS = 300000UL;  // deprem sorgusu 5 dk
+const unsigned long ALERT_TICKER_MS = 3600000UL;      // alt yazida (haber bandi) 60 dk gorunur
+#define ALERT_ACK_FILE "/alerts_ack.json"
 
 // ---- MQTT ----
 #define MQTT_BROKER "broker.hivemq.com"

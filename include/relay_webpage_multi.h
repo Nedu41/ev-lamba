@@ -9,6 +9,12 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
 
 <style>
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+#alertbar { position: sticky; top: 0; z-index: 50; }
+.alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 8px; padding: 10px 12px; border-radius: 8px; border: 2px solid #FF9800; color: #fff; animation: pulse 1.2s infinite; }
+.alert-eq { background: #B71C1C; }
+.alert-wx { background: #B23A00; }
+.alert small { opacity: 0.9; }
+.alert button { flex: none; background: #fff; color: #222; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: bold; cursor: pointer; }
 .btn.pulsing { animation: pulse 1s infinite; }
 .btn.success { background: #4CAF50 !important; color: white !important; }
 .btn.error { background: #cf6679 !important; color: white !important; }
@@ -587,13 +593,20 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
 
 /* Cihaz kartlari - telefonda tek sutun, genis ekranda yan yana */
 .dev-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-.dev-card { background: #1e1e1e; border: 1px solid #333; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-.dev-card-head { display: flex; align-items: center; gap: 8px; }
+.dev-list { gap: 14px; }
+.dev-card { background: #181818; border: 2px solid #555; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 0 0 1px #000, 0 4px 12px rgba(0,0,0,0.7); }
+.dev-card.is-on { border-color: #00c853; }
+.dev-card.is-off { border-color: #d32f2f; }
+.dev-card-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 2px solid #3a3a3a; }
 .dev-card-head .compact-input { flex: 1; font-weight: bold; }
-.dev-card-row { display: flex; align-items: center; gap: 8px; font-size: 0.85em; }
+.dev-card-row { display: flex; align-items: center; gap: 8px; font-size: 0.85em; padding: 6px 0; border-bottom: 1px solid #2c2c2c; }
 .dev-card-row > span { width: 55px; color: #888; flex-shrink: 0; }
 .dev-card-row > input, .dev-card-row > select { flex: 1; }
 .dev-card-row .mac-box-compact, .dev-card-row .rssi-value-compact { flex: 1; max-width: none; text-align: left; }
+/* LED'ler: belirgin parlaklik. Yesil = bagli, kirmizi = yok, sonuk gri = kapali */
+.dev-card .status-dot { width: 14px; height: 14px; margin-right: 0; border: 2px solid rgba(0,0,0,0.55); flex-shrink: 0; }
+.dev-card .online-dot { background: #00e676; box-shadow: 0 0 3px #00e676, 0 0 9px #00e676, 0 0 16px #00e676; }
+.dev-card .offline-dot { background: #ff1744; box-shadow: 0 0 3px #ff1744, 0 0 9px #ff1744; }
 .mini-btn { background: #333; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
 .feat-icons { font-size: 0.85em; margin-left: 4px; }
 .note-row { display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-bottom: 1px solid #333; }
@@ -625,6 +638,8 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
   <a href="/notes" id="nav5" onclick="route('/notes');return false;">Notlar</a>
   <a href="/wifi" id="nav6" onclick="route('/wifi');return false;">WiFi</a>
 </div>
+
+<div id="alertbar"></div>
 
 <div id="content">Yükleniyor...</div>
 
@@ -677,8 +692,25 @@ function connectWS() {
             }
         } else if (msg.type === "scan_result") {
             renderScanResults(msg.devices || []);
+        } else if (msg.type === "alerts") {
+            renderAlerts(msg.list || []);
         }
     };
+}
+
+// Hava/deprem uyarilari: onaylanana kadar kalir (HUB ekranindaki banner da kalkar)
+let ALERTS = [];
+function renderAlerts(list) {
+    ALERTS = list;
+    const el = document.getElementById('alertbar');
+    if (!el) return;
+    el.innerHTML = list.map(a =>
+        `<div class="alert ${a.kind === 1 ? 'alert-eq' : 'alert-wx'}">` +
+        `<div><b>${a.kind === 1 ? '🌍' : '⛈️'} ${escHtml(a.title)}</b><br><small>${escHtml(a.detail)}</small></div>` +
+        `<button onclick="ackAlert('${escHtml(a.id)}')">Onayla</button></div>`).join('');
+}
+function ackAlert(id) {
+    fetch('/alert_ack?id=' + encodeURIComponent(id)).then(() => renderAlerts(ALERTS.filter(a => a.id !== id)));
 }
 
 // 5sn: sunucu zayif sinyalli cihaza bir kez yeniden deniyor (2 x ~1.8sn)
@@ -1173,7 +1205,7 @@ function renderSettings() {
             const online = status.r1_state !== undefined && status.r1_state !== "OFFLINE";
             const rssi = status.wifi_rssi;
             html += `
-                <div class="dev-card">
+                <div class="dev-card ${online ? 'is-on' : 'is-off'}">
                     <div class="dev-card-head">
                         <span class="status-dot ${online ? 'online-dot' : 'offline-dot'}"></span>
                         <input type="text" id="n${i}" value="${escHtml(d.name)}" class="compact-input" onchange="saveDevices()" placeholder="Cihaz Adı">
@@ -1275,7 +1307,7 @@ function mqttRow(i, status, online) {
     if (typeof status.mqtt_enabled !== 'boolean')
         return '<small style="color:#888">firmware eski (v2.6 gerekli)</small>';
     const on = status.mqtt_enabled, conn = !!status.mqtt_connected;
-    const dot = !on ? 'background:#555' : conn ? 'background:#4CAF50;box-shadow:0 0 5px #4CAF50' : 'background:#cf6679;box-shadow:0 0 5px #cf6679';
+    const dot = !on ? 'background:#3a3a3a;box-shadow:none' : conn ? 'background:#00e676;box-shadow:0 0 3px #00e676,0 0 9px #00e676,0 0 16px #00e676' : 'background:#ff1744;box-shadow:0 0 3px #ff1744,0 0 9px #ff1744';
     const title = !on ? "kapalı" : conn ? "broker'a bağlı" : "broker'a bağlı değil";
     return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                 <input type="checkbox" ${on ? 'checked' : ''} onchange="setDeviceMqtt(${i}, this)"> uzaktan kontrol
@@ -1685,6 +1717,7 @@ function renderWeather() {
                 <button class="btn" id="refreshWeatherBtn" onclick="refreshWeather()" style="background:#2196F3">🔄 Hava Durumunu Güncelle</button>
                 <button class="btn" onclick="skyDemo(this)" style="background:#FF9800;color:#000">🌅 Ekranda 24 Saat Demosu (~2 dk)</button>
                 <button class="btn" onclick="weatherDemo(this)" style="background:#03dac6;color:#000">⛈️ Ekranda Hava Demosu (kar, fırtına... ~1 dk)</button>
+                <button class="btn" onclick="alertDemo(this)" style="background:#f44336;color:#fff">🚨 Uyarı Demosu (banner + üst şerit + alt yazı, 20 sn)</button>
             </div>
         </div>`;
         
@@ -1699,6 +1732,15 @@ function skyDemo(btn) {
         .then(r => { if (!r.ok) throw new Error(); toast("✓ HUB ekranında 24 saat demosu başladı (~2 dk)"); })
         .catch(() => toast("✗ Demo başlatılamadı", true))
         .finally(() => setTimeout(() => { btn.disabled = false; }, 120000));
+}
+
+// Ornek hava + deprem uyarisi: TFT banner/ust serit/alt yazi + bu sayfadaki cubuk (20 sn, sonra kendiliginden kalkar)
+function alertDemo(btn) {
+    btn.disabled = true;
+    fetch("/alert_demo")
+        .then(r => { if (!r.ok) throw new Error(); toast("✓ Örnek uyarılar 20 sn gösterilecek"); })
+        .catch(() => toast("✗ Demo başlatılamadı", true))
+        .finally(() => setTimeout(() => { btn.disabled = false; }, 21000));
 }
 
 // HUB ekraninda tum hava sahnelerini 8'er saniye sirayla gosterir
