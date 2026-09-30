@@ -386,22 +386,185 @@ static void setFixedPalette() {
   scene.setPaletteColor(P_RED, COL_RED);
 }
 
-// 0 = alacakaranlik yok, 1 = tam kizillik. Gundogumu/gunbatimi saatine (HH:MM,
-// Open-Meteo'dan) ne kadar yakinsak o kadar guclu; pencere disinda soner.
-static float twilightFactor() {
-  if (wv.sunrise.length() != 5 || wv.sunset.length() != 5) return 0;
+// ============== Gunes konumu / gokyuzu renkleri (saate gore) ==============
+// Gunes yuksekligi (derece, yaklasik): gunduz 50*sin(pi*f) (f = gun ici oran),
+// gece ufuk civarindaki hizla (~0.2 derece/dk) asagi iner. Gercek astronomi
+// degil ama tan agarmasi (-18..-6), sivil alacakaranlik (-6..0), altin saat
+// (0..8) gibi evreleri gundogumu/batimi saatinden dogru sirayla uretir.
+struct SkyTime {
+  bool valid;
+  float elev;      // derece; <0 gunes ufkun altinda
+  bool evening;    // ogleden sonra / aksam (kizillik sabahtan daha kirmizi)
+  float dayFrac;   // 0 = gundogumu, 1 = gunbatimi (gunes yayi icin)
+  float noonH;     // gunes ogleni (saat) - ay konumu icin
+};
+
+// Gokyuzu demo modu (/sky_demo): 24 saati ~2 dakikada oynatir, sonra gercek
+// saate doner - tan/kizillik/gece gecislerini beklemeden gormek icin
+static volatile bool skyDemoReq = false;
+static float skyDemoMin = -1, skyDemoLeft = 0;
+const float SKY_DEMO_SPEED = 12.0f;  // dakika / saniye
+
+void startSkyDemo() { skyDemoReq = true; }
+
+// Sahnenin kullandigi saat (gece yarisindan beri dakika) - demo acikken sanal saat
+static bool sceneMinutes(float& out) {
+  if (skyDemoMin >= 0) { out = skyDemoMin; return true; }
   struct tm t;
-  if (!getLocalTime(&t, 0)) return 0;
-  int nowMin = t.tm_hour * 60 + t.tm_min;
-  int sunriseMin = wv.sunrise.substring(0, 2).toInt() * 60 + wv.sunrise.substring(3, 5).toInt();
-  int sunsetMin  = wv.sunset.substring(0, 2).toInt() * 60 + wv.sunset.substring(3, 5).toInt();
-  const int WINDOW = 50;  // dakika, gundogumu/batimindan her iki yonde
-  int d = min(abs(nowMin - sunriseMin), abs(nowMin - sunsetMin));
-  if (d > WINDOW) return 0;
-  return 1.0f - (float)d / WINDOW;
+  if (!getLocalTime(&t, 0)) return false;
+  out = t.tm_hour * 60 + t.tm_min + t.tm_sec / 60.0f;
+  return true;
+}
+
+static SkyTime skyTime() {
+  SkyTime s{false, wv.isDay ? 30.0f : -30.0f, false, 0.5f, 12.5f};
+  if (wv.sunrise.length() != 5 || wv.sunset.length() != 5) return s;
+  float now;
+  if (!sceneMinutes(now)) return s;
+  float rise = wv.sunrise.substring(0, 2).toInt() * 60 + wv.sunrise.substring(3, 5).toInt();
+  float set = wv.sunset.substring(0, 2).toInt() * 60 + wv.sunset.substring(3, 5).toInt();
+  if (set <= rise) return s;
+  const float PEAK = 50.0f, RATE = 0.2f;
+  s.valid = true;
+  s.noonH = (rise + set) / 120.0f;
+  if (now >= rise && now <= set) {
+    s.dayFrac = (now - rise) / (set - rise);
+    s.elev = PEAK * sinf(PI * s.dayFrac);
+    s.evening = s.dayFrac > 0.5f;
+  } else if (now < rise) {
+    s.elev = -RATE * (rise - now);
+    s.dayFrac = 0;
+  } else {
+    s.elev = -RATE * (now - set);
+    s.evening = true;
+    s.dayFrac = 1;
+  }
+  if (s.elev < -30) s.elev = -30;
+  return s;
+}
+
+static void mixRGB(const RGB a, const RGB b, float f, RGB out) {
+  f = constrain(f, 0.0f, 1.0f);
+  for (int j = 0; j < 3; j++) out[j] = (uint8_t)(a[j] + (b[j] - a[j]) * f);
+}
+
+// Acik gokyuzu, gunes yuksekligine gore (ust -> ufuk). Aksam tablosu ufukta
+// daha kizil/mor (toz, nem), sabah daha pembe-altin.
+static const float SKY_E[10] = {-18, -12, -7, -3, 0, 3, 8, 15, 30, 50};
+static const RGB SKY_AM[10][4] = {
+  {{0,0,0},{0,0,4},{2,3,12},{6,9,24}},             // gece
+  {{1,2,12},{4,7,26},{10,14,44},{22,26,66}},       // astronomik tan
+  {{6,12,44},{22,30,80},{60,55,110},{120,80,120}}, // tan agarmasi (mor)
+  {{18,34,96},{60,70,140},{170,110,130},{245,140,95}},
+  {{32,60,140},{95,110,175},{235,150,120},{255,170,80}},  // gundogumu
+  {{40,85,170},{95,135,205},{215,175,150},{255,195,120}},
+  {{35,90,180},{70,130,210},{140,175,220},{220,210,190}},  // altin saat sonu
+  {{28,85,185},{55,120,210},{100,160,230},{175,205,235}},
+  {{20,75,178},{42,108,202},{78,148,226},{150,195,240}},
+  {{14,64,170},{34,98,198},{68,138,224},{140,190,242}},    // ogle
+};
+static const RGB SKY_PM[10][4] = {
+  {{0,0,0},{0,0,4},{2,3,12},{6,9,24}},
+  {{1,2,10},{5,6,24},{14,12,40},{28,20,52}},
+  {{8,10,40},{30,22,70},{90,40,90},{150,60,70}},   // alacakaranlik (mor-kizil)
+  {{20,24,80},{80,45,110},{200,70,80},{250,110,50}},
+  {{35,50,120},{130,75,130},{245,105,70},{255,140,40}},   // gunbatimi
+  {{40,75,160},{120,110,165},{240,150,100},{255,175,70}},
+  {{35,90,180},{70,130,210},{140,175,220},{220,210,190}},
+  {{28,85,185},{55,120,210},{100,160,230},{175,205,235}},
+  {{20,75,178},{42,108,202},{78,148,226},{150,195,240}},
+  {{14,64,170},{34,98,198},{68,138,224},{140,190,242}},
+};
+
+static void skyAt(float e, bool evening, RGB out[4]) {
+  const RGB (*T)[4] = evening ? SKY_PM : SKY_AM;
+  int i = 0;
+  while (i < 8 && e >= SKY_E[i + 1]) i++;
+  float f = (e - SKY_E[i]) / (SKY_E[i + 1] - SKY_E[i]);
+  for (int k = 0; k < 4; k++) mixRGB(T[i][k], T[i + 1][k], f, out[k]);
+}
+
+// Gunes rengi: ufukta kizil-turuncu, yukseldikce sari-beyaz
+static void sunColorAt(float e, RGB out) {
+  static const float E[6] = {-2, 0, 3, 8, 20, 40};
+  static const RGB C[6] = {{255,70,40},{255,95,40},{255,140,50},{255,190,80},{255,225,120},{255,242,175}};
+  int i = 0;
+  while (i < 4 && e >= E[i + 1]) i++;
+  mixRGB(C[i], C[i + 1], (e - E[i]) / (E[i + 1] - E[i]), out);
+}
+
+// 0 = alacakaranlik yok, 1 = tam kizillik (gunes ufuk civarindayken) -
+// kapali/yagisli havalarin paletinde ufka sizan renk icin
+static float twilightFactor() {
+  SkyTime st = skyTime();
+  if (!st.valid) return 0;
+  return constrain(1.0f - fabsf(st.elev - 0.5f) / 9.0f, 0.0f, 1.0f);
+}
+
+// Acik/parcali bulutlu gokyuzu paleti: tamamen gunes yuksekligine gore
+static void setOpenSkyPalette(Scene sc, const SkyTime& st) {
+  RGB sky[4];
+  skyAt(st.elev, st.evening, sky);
+  for (int i = 0; i < 4; i++) {
+    skyColors[i] = tft.color565(sky[i][0], sky[i][1], sky[i][2]);
+    scene.setPaletteColor(P_SKY1 + i, skyColors[i]);
+  }
+  RGB sun;
+  sunColorAt(st.elev, sun);
+  static const RGB MOON = {240, 238, 205};
+  bool sunUp = st.elev > -2;
+  const uint8_t* acc = sunUp ? sun : MOON;
+  scene.setPaletteColor(P_ACCENT, tft.color565(acc[0], acc[1], acc[2]));
+
+  // Zemin (tepeler): gunduz koyu yesil, alacakaranlikta siyaha yakin siluet
+  float light = constrain((st.elev + 4) / 16.0f, 0.0f, 1.0f);
+  static const RGB GROUND_D = {30, 56, 40}, GROUND_N = {3, 4, 8};
+  RGB g;
+  mixRGB(GROUND_N, GROUND_D, light, g);
+  scene.setPaletteColor(P_BG, tft.color565(g[0], g[1], g[2]));
+
+  // Bulutlar: gunduz beyaz, gece koyu gri; gunes ufuk civarindayken alttan
+  // ufuk rengiyle (pembe/turuncu) boyanir
+  float tw = constrain(1.0f - fabsf(st.elev - 1) / 8.0f, 0.0f, 1.0f);
+  static const RGB CL_D = {240,244,248}, CD_D = {190,200,212}, CL_N = {70,78,98}, CD_N = {45,50,66};
+  RGB cl, cd;
+  mixRGB(CL_N, CL_D, light, cl);
+  mixRGB(CD_N, CD_D, light, cd);
+  mixRGB(cl, sky[3], tw * 0.55f, cl);
+  mixRGB(cd, sky[2], tw * 0.5f, cd);
+
+  if (sc == SC_PARTLY) {
+    scene.setPaletteColor(P_CLOUD_L, tft.color565(cl[0], cl[1], cl[2]));
+    scene.setPaletteColor(P_CLOUD_D, tft.color565(cd[0], cd[1], cd[2]));
+  } else if (sunUp) {
+    // Acik gunduz: bulut yok - CLOUD_D gunes haresi (gunes ile gok arasi)
+    RGB glow;
+    mixRGB(sun, sky[2], 0.55f, glow);
+    scene.setPaletteColor(P_CLOUD_D, tft.color565(glow[0], glow[1], glow[2]));
+    scene.setPaletteColor(P_CLOUD_L, tft.color565(255, 222, 170));
+  } else {
+    // Acik gece: sicak renkli yildizlar + Samanyolu/ay haresi
+    scene.setPaletteColor(P_CLOUD_L, tft.color565(255, 222, 170));
+    scene.setPaletteColor(P_CLOUD_D, tft.color565(34, 38, 62));
+  }
+  scene.setPaletteColor(P_PRECIP, tft.color565(165, 190, 255));  // yagis yok: mavi yildizlar
+  scene.setPaletteColor(P_FLASH, tft.color565(165, 163, 148));    // ay denizleri
 }
 
 static void setScenePalette(Scene sc, bool day) {
+  SkyTime st = skyTime();
+  if ((sc == SC_CLEAR || sc == SC_PARTLY) && st.valid) {
+    setOpenSkyPalette(sc, st);
+    return;
+  }
+  // Zemin (tepe siluetleri): karda beyaz, siste soluk, digerlerinde koyu
+  {
+    RGB g = {24, 36, 30};
+    if (sc == SC_SNOW) { g[0] = 200; g[1] = 205; g[2] = 214; }
+    else if (sc == SC_FOG) { g[0] = 96; g[1] = 100; g[2] = 104; }
+    float gk = day ? 1.0f : 0.3f;
+    scene.setPaletteColor(P_BG, shade(g, gk));
+  }
   // gok (ust->alt), acik bulut, koyu bulut, vurgu (gunes/ay/-), yagis
   static const RGB CLEAR_D[4] = {{20,70,160},{40,100,190},{70,135,215},{120,175,230}};
   static const RGB PARTLY_D[4] = {{30,80,165},{55,110,190},{85,140,210},{130,175,225}};
@@ -482,14 +645,23 @@ static Drop drops[70];
 static int dropCount = 0;
 static Cloud cloudsA[6];
 static int cloudCount = 0;
-static const int STAR_COUNT = 60;
+static const int STAR_COUNT = 90;
 static Star stars[STAR_COUNT];
 static uint32_t frameNo = 0;
 static uint32_t nextStrikeMs = 0, strikeEndMs = 0;
 static int16_t boltX[7], boltY[7];
+static const int MW_COUNT = 220;           // Samanyolu noktalari
+static int16_t mwX[MW_COUNT], mwY[MW_COUNT];
+static uint32_t meteorStart = 0, nextMeteor = 0;
+static float mX, mY, mVX, mVY;
 
 // Sahnenin "pencere" bandi: panellerin arasinda serbest kalan orta bolge
 const int WIN_TOP = 86, WIN_BOT = 134, WIN_MID = (WIN_TOP + WIN_BOT) / 2;
+// Ufuk: tepe siluetlerinin ortalama ust siniri; gunes/ay buradan dogup batar
+const int HORIZON_Y = 160;
+const int ARC_TOP = 104;  // ogle gunesi (sicaklik/ruzgar yazilarinin altinda kalsin)
+static int8_t hillH[SCENE_W];   // yakin sira (koyu, dolu)
+static int8_t farH[SCENE_W];    // uzak daglar (yuksek, soluk - noktali)
 
 static void initScene(Scene sc, bool day) {
   dropCount = 0;
@@ -517,31 +689,124 @@ static void initScene(Scene sc, bool day) {
 
   for (int i = 0; i < STAR_COUNT; i++) {
     stars[i].x = (int16_t)frand(2, SCENE_W - 2);
-    stars[i].y = (int16_t)frand(2, SCENE_H - 2);
+    stars[i].y = (int16_t)frand(2, HORIZON_Y - 6);
     stars[i].ph = (uint8_t)frand(0, 50);
+  }
+  // Samanyolu: sol alttan sag uste capraz, ortasi yogun bir serit
+  for (int i = 0; i < MW_COUNT; i++) {
+    float u = frand(0, 1);
+    float off = (frand(-1, 1) + frand(-1, 1) + frand(-1, 1)) * 9;  // ~normal dagilim
+    mwX[i] = (int16_t)(30 + u * 260 + off * 0.6f);
+    mwY[i] = (int16_t)(HORIZON_Y - u * (HORIZON_Y - 4) + off);
+  }
+  // Daglar: sinus toplamlari - her acilista ayni manzara. Uzak sira sivri
+  // tepeli (|sin| ile), yakin sira yuvarlak ve alcak.
+  for (int x = 0; x < SCENE_W; x++) {
+    hillH[x] = (int8_t)(6 + 6 * sinf(x * 0.021f + 1.3f) + 3.5f * sinf(x * 0.057f + 0.4f) + 1.5f * sinf(x * 0.13f));
+    float peaks = 14 * (1 - fabsf(sinf(x * 0.018f + 0.6f))) + 7 * (1 - fabsf(sinf(x * 0.047f + 2.1f)));
+    farH[x] = (int8_t)(8 + peaks + 1.5f * sinf(x * 0.21f));
   }
   nextStrikeMs = millis() + 1500;
   strikeEndMs = 0;
+  nextMeteor = millis() + (uint32_t)frand(15000, 40000);
+  meteorStart = 0;
 }
+
+// 4 gok rengi, bant sinirlari Bayer desenli noktalarla (dithering) eritilir:
+// 16 renkli palette duz seritler yerine yumusak gradyan gibi gorunur
+static const uint8_t BAYER4[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
 static void drawSky() {
-  const int band = SCENE_H / 4;
-  for (int i = 0; i < 4; i++) {
-    int h = (i == 3) ? SCENE_H - 3 * band : band;
-    scene.fillRect(0, i * band, SCENE_W, h, P_SKY1 + i);
+  const int band = HORIZON_Y / 4;
+  const int BLEND = 12;  // sinirin her iki yaninda gecis satiri
+  for (int y = 0; y < SCENE_H; y++) {
+    int i = min(y / band, 3);
+    int base = P_SKY1 + i, next = -1;
+    float p = 0;
+    int below = (i + 1) * band, above = i * band;
+    if (i < 3 && y >= below - BLEND) { next = base + 1; p = (y - (below - BLEND)) / (2.0f * BLEND); }
+    else if (i > 0 && y < above + BLEND) { next = base - 1; p = ((above + BLEND) - y) / (2.0f * BLEND); }
+    scene.drawFastHLine(0, y, SCENE_W, base);
+    if (next >= 0) {
+      int th = (int)(p * 16);
+      const uint8_t* row = BAYER4[y & 3];
+      for (int x = 0; x < SCENE_W; x++)
+        if (row[x & 3] < th) scene.drawPixel(x, y, next);
+    }
   }
 }
 
-static void drawSun(int cx, int cy, float t) {
-  float rot = t * 0.4f;
-  for (int k = 0; k < 10; k++) {
-    float a = rot + k * (2 * PI / 10);
-    float c = cosf(a), s = sinf(a);
-    int r2 = 29 + (int)(2 * sinf(t * 2 + k));
-    scene.drawLine(cx + c * 21, cy + s * 21, cx + c * r2, cy + s * r2, P_ACCENT);
-    scene.drawLine(cx + c * 21 + 1, cy + s * 21, cx + c * r2 + 1, cy + s * r2, P_ACCENT);
+static void drawHills() {
+  // Uzak daglar: ayni renk ama %50 noktali -> havanin arkasinda soluk kalir
+  // (hava perspektifi), yakin sira onun onunde tam koyu
+  for (int x = 0; x < SCENE_W; x++) {
+    int top = HORIZON_Y - farH[x];
+    for (int y = top; y < HORIZON_Y; y++)
+      if (((x + y) & 1) == 0 || y == top) scene.drawPixel(x, y, P_BG);
   }
-  scene.fillCircle(cx, cy, 16 + (int)sinf(t * 1.5f), P_ACCENT);
+  for (int x = 0; x < SCENE_W; x++) {
+    int top = HORIZON_Y - hillH[x];
+    scene.drawFastVLine(x, top, SCENE_H - top, P_BG);
+  }
+}
+
+// Yumusak hare: iceride yogun, disarida seyrek titresimli noktalar
+static void drawHalo(int cx, int cy, int r, int w, uint8_t col) {
+  const int H = r + w;
+  for (int dy = -H; dy <= H; dy++) {
+    for (int dx = -H; dx <= H; dx++) {
+      int d2 = dx * dx + dy * dy;
+      if (d2 <= (r + 1) * (r + 1) || d2 > H * H) continue;
+      bool inner = d2 <= (r + w / 2) * (r + w / 2);
+      if (inner ? ((dx + dy) & 1) == 0 : ((dx & 1) && (dy & 1) && ((dx + dy) & 3) == 0))
+        scene.drawPixel(cx + dx, cy + dy, col);
+    }
+  }
+}
+
+// Gok cismi yayi: f=0 doguda ufukta, 0.5 en yuksekte, 1 batida ufukta
+static void arcPos(float f, int& x, int& y) {
+  x = 24 + (int)(f * (SCENE_W - 48));
+  y = HORIZON_Y - (int)(sinf(PI * f) * (HORIZON_Y - ARC_TOP));
+}
+
+static void sunPos(const SkyTime& st, int& x, int& y) {
+  if (!st.valid) { x = 160; y = WIN_MID; return; }
+  arcPos(st.dayFrac, x, y);
+  if (st.elev < 0) y = HORIZON_Y + (int)(-st.elev * 4);  // batmis: tepelerin arkasina iner
+}
+
+// Ay: gunese gore evre kadar geride - yeni ay gunesle birlikte, dolunay gece
+// yarisi meridyende. Ufuk ustunde degilse false (o gece ay yok ya da gec dogar).
+static bool moonPos(const SkyTime& st, float phase, int& x, int& y) {
+  if (!st.valid) { x = 160; y = WIN_MID; return true; }
+  float nowMin;
+  if (!sceneMinutes(nowMin)) return false;
+  float nowH = nowMin / 60.0f;
+  float transit = fmodf(st.noonH + phase * 24.84f, 24.0f);
+  float ha = nowH - transit;
+  if (ha > 12) ha -= 24;
+  if (ha < -12) ha += 24;
+  const float HALF = 6.2f;  // ufuk ustunde kalma yarisi (saat)
+  if (fabsf(ha) > HALF + 0.3f) return false;
+  arcPos((ha + HALF) / (2 * HALF), x, y);
+  return true;
+}
+
+static void drawSun(int cx, int cy, float t, float elev, bool glow) {
+  int r = elev < 6 ? 19 : 16;  // ufukta daha iri gorunur
+  if (glow) drawHalo(cx, cy, r, 12, P_CLOUD_D);
+  if (elev > 6) {
+    float rot = t * 0.4f;
+    for (int k = 0; k < 10; k++) {
+      float a = rot + k * (2 * PI / 10);
+      float c = cosf(a), s = sinf(a);
+      int r2 = r + 13 + (int)(2 * sinf(t * 2 + k));
+      scene.drawLine(cx + c * (r + 5), cy + s * (r + 5), cx + c * r2, cy + s * r2, P_ACCENT);
+      scene.drawLine(cx + c * (r + 5) + 1, cy + s * (r + 5), cx + c * r2 + 1, cy + s * r2, P_ACCENT);
+    }
+  }
+  scene.fillCircle(cx, cy, r + (int)sinf(t * 1.5f), P_ACCENT);
 }
 
 // Gercek ay evresi: 0 = yeni ay, 0.5 = dolunay. Bilinen yeni ay 2000-01-06
@@ -620,18 +885,54 @@ static void drawDimSun(int cx, int cy) {
   scene.fillCircle(cx, cy, 16, P_ACCENT);
 }
 
-static void drawStars() {
+// Yildizlar gok karardikca kademeli cikar: once en parlaklar (gunes -4
+// derecenin altinda), sonra orta, tam karanlikta (-12) hepsi. Orta parlaktakilerin
+// bir kismi mavimsi / sicak renkli (renkler sadece acik gecede palette var).
+static void drawStars(bool colored, float elev) {
+  int tier = elev < -12 ? 3 : elev < -8 ? 2 : elev < -4 ? 1 : 0;
+  if (!tier) return;
   for (int i = 0; i < STAR_COUNT; i++) {
-    bool bright = (i % 3 == 0);                        // ~1/3 parlak, gerisi sonuk
-    bool on = ((frameNo + stars[i].ph) % 50) < 40;     // titresim
-    uint8_t col = bright ? (on ? P_WHITE : P_GRAY) : (on ? P_GRAY : P_SKY3);
+    int mag = (i % 9 == 0) ? 1 : (i % 3 == 0) ? 2 : 3;  // 1 = en parlak
+    if (mag > tier) continue;
+    bool on = ((frameNo + stars[i].ph) % 50) < 40;       // titresim
+    uint8_t col;
+    if (mag == 1) col = on ? P_WHITE : P_GRAY;
+    else if (mag == 2) {
+      int k = i % 4;
+      col = !on ? P_GRAY : (colored && k == 0) ? P_PRECIP : (colored && k == 1) ? P_CLOUD_L : P_WHITE;
+    } else col = on ? P_GRAY : P_SKY3;
     scene.drawPixel(stars[i].x, stars[i].y, col);
-    if (bright && on && (i % 9 == 0)) {  // en parlaklar: kucuk arti
+    if (mag == 1 && on) {  // en parlaklar: kucuk arti
       scene.drawPixel(stars[i].x - 1, stars[i].y, P_GRAY);
       scene.drawPixel(stars[i].x + 1, stars[i].y, P_GRAY);
       scene.drawPixel(stars[i].x, stars[i].y - 1, P_GRAY);
       scene.drawPixel(stars[i].x, stars[i].y + 1, P_GRAY);
     }
+  }
+}
+
+static void drawMilkyWay() {
+  for (int i = 0; i < MW_COUNT; i++) scene.drawPixel(mwX[i], mwY[i], P_CLOUD_D);
+}
+
+// Kayan yildiz: 15-60 sn'de bir, ~0.6 sn suren parlak cizgi + sonen kuyruk
+static void updateMeteor(uint32_t now) {
+  if (now >= nextMeteor) {
+    meteorStart = now;
+    nextMeteor = now + (uint32_t)frand(15000, 60000);
+    mX = frand(40, SCENE_W - 40);
+    mY = frand(6, 60);
+    float a = frand(0.35f, 0.7f), dir = frand(0, 1) < 0.5f ? -1 : 1;
+    mVX = dir * cosf(a) * 260;
+    mVY = sinf(a) * 260;
+  }
+  uint32_t age = now - meteorStart;
+  if (!meteorStart || age > 600) return;
+  float s = age / 1000.0f;
+  for (int k = 0; k < 16; k++) {
+    float b = s - k * 0.006f;
+    if (b < 0) break;
+    scene.drawPixel((int)(mX + mVX * b), (int)(mY + mVY * b), k < 4 ? P_WHITE : P_GRAY);
   }
 }
 
@@ -710,22 +1011,32 @@ static void drawFog(float t) {
 static void renderScene(Scene sc, bool day, float dt, float t, uint32_t now) {
   drawSky();
   bool openSky = (sc == SC_CLEAR || sc == SC_PARTLY);
+  SkyTime st = skyTime();
+  float elev = st.valid ? st.elev : (day ? 30.0f : -30.0f);
+  bool sunUp = elev > -2;
   // Yildizlar: gece yagissiz her havada (kapalida bulutlar gectikce ortulur)
   bool precip = (sc == SC_RAIN || sc == SC_SNOW || sc == SC_THUNDER || sc == SC_DRIZZLE || sc == SC_FOG);
-  if (!day && !precip) drawStars();
+  if (!precip) {
+    if (sc == SC_CLEAR && elev < -15) drawMilkyWay();
+    drawStars(openSky, elev);
+    if (openSky && elev < -10) updateMeteor(now);
+  }
   // Gok cismi bulutlardan ONCE cizilir: bulutlar gecerken onu ortup acar.
   // BUGFIX: sadece yagmur/kar/firtina haric tutuluyordu - ciseleme (drizzle,
   // kod 51-57) ve sis de "precip" sayildigi halde disarida kaliyordu, %100
   // bulutlu ciselemede bile soluk gunes gorunuyordu (2026-09-28 gozlemlendi,
   // canli kod 55). Simdi TUM yagisli/sisli sahnelerde gok cismi gizli.
+  // Gunes/ay gun icinde yay cizerek hareket eder, tepelerin arkasina batar.
   if (!precip) {
-    if (day) {
-      if (openSky) drawSun(160, WIN_MID, t);
-      else drawDimSun(160, WIN_MID);
-    } else {
-      drawMoon(160, WIN_MID, moonPhase());
+    int x, y;
+    if (sunUp) {
+      sunPos(st, x, y);
+      if (openSky) drawSun(x, y, t, elev, sc == SC_CLEAR);
+      else drawDimSun(x, y);
     }
+    if (elev < 0 && moonPos(st, moonPhase(), x, y)) drawMoon(x, y, moonPhase());
   }
+  drawHills();
   if (sc == SC_FOG) drawFog(t);
   updateClouds(dt);
   if (sc == SC_THUNDER) updateLightning(now);
@@ -964,14 +1275,41 @@ void displayTask(void* pvParameters) {
 
     if (animated) {
       Scene sc = wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
+      static uint32_t lastPalette = 0;
+      if (skyDemoReq) {
+        skyDemoReq = false;
+        float m;
+        skyDemoMin = sceneMinutes(m) ? m : 0;
+        skyDemoLeft = 24 * 60;
+      }
+      if (skyDemoMin >= 0) {
+        skyDemoMin = fmodf(skyDemoMin + dt * SKY_DEMO_SPEED, 24 * 60);
+        skyDemoLeft -= dt * SKY_DEMO_SPEED;
+        if (skyDemoLeft <= 0) skyDemoMin = -1;
+        lastPalette = 0;  // demoda renkler her karede akar
+      }
       if (sc != cur || wv.isDay != curDay) {
         cur = sc;
         curDay = wv.isDay;
         setScenePalette(cur, curDay);
         initScene(cur, curDay);
+        lastPalette = now;
+      } else if (lastPalette == 0 || now - lastPalette > 20000) {
+        // Gok renkleri saate bagli (tan, kizillik, alacakaranlik) - eskiden sadece
+        // hava/gun-gece degisince kuruluyordu, kizillik o anki haliyle donup kaliyordu
+        setScenePalette(cur, curDay);
+        lastPalette = now;
       }
       renderScene(cur, curDay, dt, t, now);
       drawPanels(scene, 0, SPRITE_COLS);
+      if (skyDemoMin >= 0) {
+        char dm[12];
+        snprintf(dm, sizeof(dm), "DEMO %02d:%02d", (int)skyDemoMin / 60, (int)skyDemoMin % 60);
+        scene.setTextColor(P_WHITE);
+        scene.setTextDatum(TR_DATUM);
+        scene.drawString(dm, SCENE_W - 8, WIN_TOP + 2, 2);
+        scene.setTextDatum(TL_DATUM);
+      }
       scene.pushSprite(0, SCENE_Y);
     }
 

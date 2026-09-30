@@ -43,6 +43,7 @@
 #include "mqtt_link.h"
 #include "telegram.h"
 #include "events.h"
+#include "wifi_nets.h"
 
 void setup() {
   Serial.begin(115200);
@@ -71,10 +72,13 @@ void setup() {
   loadWeatherConfig();
 loadScheduleConfig();  // YENİ
 
-  // WiFi Manager
-  wm.setConfigPortalTimeout(120);
-  wm.setDebugOutput(false);
-  wm.autoConnect("MerkeziHUB_SETUP");
+  // Once web'den eklenen kayitli aglar (tercih edilen once), tutmazsa
+  // WiFi Manager (NVS'deki ev agi, o da olmazsa kurulum portali)
+  if (!wifiNetsBoot()) {
+    wm.setConfigPortalTimeout(120);
+    wm.setDebugOutput(false);
+    wm.autoConnect("MerkeziHUB_SETUP");
+  }
 
   displayWifiConnected();
 

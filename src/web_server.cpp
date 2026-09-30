@@ -12,7 +12,10 @@
 #include "telegram.h"
 #include "events.h"
 #include "display.h"
+#include "wifi_nets.h"
 #include "relay_webpage_multi.h"
+
+static volatile unsigned long restartAt = 0;  // 0 = yok; webLoop() zamani gelince yeniden baslatir
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
@@ -384,6 +387,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
 
 void handleWiFiReset(AsyncWebServerRequest *request) {
   wm.resetSettings();
+  wifiNetsClear();  // yoksa acilista listedeki aga baglanir, kurulum portali hic acilmazdi
   request->send(200, "text/plain", "Reset");
   delay(1000);
   ESP.restart();
@@ -676,6 +680,11 @@ void setupWebServer() {
     request->send(200, "application/json", eventsJson());
   });
   server.on("/fetch_status", AsyncWebRequestMethod::HTTP_GET, handleStatusFetch);
+  // HUB ekraninda 24 saatlik gokyuzu dongusunu ~2 dakikada oynatir
+  server.on("/sky_demo", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    startSkyDemo();
+    request->send(200, "text/plain", "Gokyuzu demosu basladi (~2 dk)");
+  });
   server.on("/proxy", AsyncWebRequestMethod::HTTP_GET, handleProxy);
   server.on("/get_devices", AsyncWebRequestMethod::HTTP_GET, handleGetDevices);
   server.on("/save_devices", AsyncWebRequestMethod::HTTP_POST,
@@ -708,6 +717,62 @@ void setupWebServer() {
     });
   server.on("/get_weather_status", AsyncWebRequestMethod::HTTP_GET, handleGetWeatherStatus);
   server.on("/reset_wifi", AsyncWebRequestMethod::HTTP_GET, handleWiFiReset);
+
+  // ---- WiFi aglari (SuDepoSis'teki bolum gibi): tara / kaydet / baglan / sil ----
+  server.on("/wifi", AsyncWebRequestMethod::HTTP_GET, handleRoot);
+  server.on("/wifi_info", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", wifiNetsInfoJson());
+  });
+  // Tarama arka planda (async): ilk cagri baslatir, sayfa sonuc gelene kadar yoklar -
+  // bloklayan scanNetworks() AsyncTCP gorevini birkac saniye kilitlerdi
+  server.on("/wifi_scan", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_FAILED) {
+      WiFi.scanNetworks(true);
+      request->send(200, "application/json", "{\"scanning\":true}");
+      return;
+    }
+    if (n == WIFI_SCAN_RUNNING) {
+      request->send(200, "application/json", "{\"scanning\":true}");
+      return;
+    }
+    JsonDocument out;
+    JsonArray list = out["networks"].to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+      if (WiFi.SSID(i).length() == 0) continue;
+      bool dup = false;  // ayni SSID'li birden cok erisim noktasi: en gucluyu tut
+      for (JsonObject o : list) if (o["ssid"] == WiFi.SSID(i)) { dup = true; break; }
+      if (dup) continue;
+      JsonObject o = list.add<JsonObject>();
+      o["ssid"] = WiFi.SSID(i);
+      o["rssi"] = WiFi.RSSI(i);
+      o["secured"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+    }
+    WiFi.scanDelete();
+    String s;
+    serializeJson(out, s);
+    request->send(200, "application/json", s);
+  });
+  // Sifre URL'de gitmesin diye POST form
+  server.on("/wifi_add", AsyncWebRequestMethod::HTTP_POST, [](AsyncWebServerRequest *request) {
+    String ssid = request->hasParam("ssid", true) ? request->getParam("ssid", true)->value() : "";
+    String pass = request->hasParam("pass", true) ? request->getParam("pass", true)->value() : "";
+    bool ok = wifiNetsAdd(ssid, pass);
+    request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"msg\":\"SSID gecersiz ya da liste dolu (en fazla 6)\"}");
+  });
+  server.on("/wifi_delete", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    int idx = request->hasParam("idx") ? request->getParam("idx")->value().toInt() : -1;
+    bool ok = wifiNetsDelete(idx);
+    request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+  });
+  // Canli ag degistirmek guvenilir degil (SuDepoSis'te de ayni sonuc) - tercih
+  // edilen yapilip yeniden baslatilir; tutmazsa acilista siradaki aglar denenir
+  server.on("/wifi_connect", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    int idx = request->hasParam("idx") ? request->getParam("idx")->value().toInt() : -1;
+    bool ok = wifiNetsMakePreferred(idx);
+    request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+    if (ok) restartAt = millis() + 1500;
+  });
   server.on("/restart_hub", AsyncWebRequestMethod::HTTP_GET, handleRestart);
   server.on("/test_telegram", AsyncWebRequestMethod::HTTP_GET, handleTestTelegram);  // YENİ: Test endpoint'i
 
@@ -725,6 +790,13 @@ void webLoop() {
   if (millis() - lastWsCleanup > 5000) {
     lastWsCleanup = millis();
     ws.cleanupClients();
+  }
+  // Ertelenmis yeniden baslatma: HTTP cevabi istemciye ulassin diye
+  if (restartAt && (long)(millis() - restartAt) >= 0) {
+    Serial.println("[WiFi] Secilen aga baglanmak icin yeniden baslatiliyor");
+    WiFi.disconnect(true);
+    delay(150);
+    ESP.restart();
   }
 
 }

@@ -623,6 +623,7 @@ input.invalid { border-color: #cf6679 !important; background: #3a1f24 !important
   <a href="/weather" id="nav3" onclick="route('/weather');return false;">Oto-Hava</a>
   <a href="/log" id="nav4" onclick="route('/log');return false;">Kayıt</a>
   <a href="/notes" id="nav5" onclick="route('/notes');return false;">Notlar</a>
+  <a href="/wifi" id="nav6" onclick="route('/wifi');return false;">WiFi</a>
 </div>
 
 <div id="content">Yükleniyor...</div>
@@ -1682,11 +1683,21 @@ function renderWeather() {
             <!-- Butonlar -->
             <div style="display:flex;flex-direction:column;gap:10px">
                 <button class="btn" id="refreshWeatherBtn" onclick="refreshWeather()" style="background:#2196F3">🔄 Hava Durumunu Güncelle</button>
+                <button class="btn" onclick="skyDemo(this)" style="background:#FF9800;color:#000">🌅 Ekranda 24 Saat Demosu (~2 dk)</button>
             </div>
         </div>`;
         
         document.getElementById("content").innerHTML = html;
     });
+}
+
+// HUB ekraninda gokyuzunu (tan, kizillik, gece, ay/yildiz) 24 saat hizli oynatir
+function skyDemo(btn) {
+    btn.disabled = true;
+    fetch("/sky_demo")
+        .then(r => { if (!r.ok) throw new Error(); toast("✓ HUB ekranında 24 saat demosu başladı (~2 dk)"); })
+        .catch(() => toast("✗ Demo başlatılamadı", true))
+        .finally(() => setTimeout(() => { btn.disabled = false; }, 120000));
 }
 
 function autoSaveWeather() {
@@ -1806,6 +1817,101 @@ function renderEvents() {
 // --- NOTLAR SAYFASI (HUB'da kalici: /get_notes, /save_notes) ---
 let NOTES = [];
 
+// ===== WiFi aglari (SuDepoSis'teki bolum gibi) =====
+// Kayitli aglar HUB'da listelenir; acilista sirayla denenir (en ustteki once).
+// "Bağlan" o agi en uste alir ve HUB'i yeniden baslatir - tutmazsa sonraki
+// aglar (ev agi dahil) denenir, HUB agdan kopuk kalmaz.
+function renderWifi() {
+    fetch("/wifi_info").then(r => r.json()).then(info => {
+        const saved = info.saved || [];
+        const cur = info.ssid
+            ? `<span class="status-dot online-dot"></span> <b>${escHtml(info.ssid)}</b> · ${info.rssi} dBm · ${escHtml(info.ip)}`
+            : '<span class="status-dot offline-dot"></span> bağlı değil';
+        const rows = saved.length ? saved.map(n => `
+            <div class="dev-card-row" style="align-items:center">
+                <span style="flex:1">${n.idx === 0 ? '⭐ ' : ''}${escHtml(n.ssid)}${n.ssid === info.ssid ? ' <small style="color:#03dac6">(bağlı)</small>' : ''}</span>
+                ${n.ssid === info.ssid ? '' : `<button class="mini-btn" onclick="wifiConnect(${n.idx}, '${escHtml(n.ssid).replace(/'/g, "\\'")}')">Bağlan</button>`}
+                <button class="mini-btn" style="color:#cf6679" onclick="wifiDelete(${n.idx}, '${escHtml(n.ssid).replace(/'/g, "\\'")}', ${n.ssid === info.ssid})">Sil</button>
+            </div>`).join('') : '<small style="color:#888">Kayıtlı ağ yok.</small>';
+
+        document.getElementById("content").innerHTML = `
+        <div class="settings-container">
+            <h3>📶 WiFi</h3>
+            <div style="background:#222;padding:12px;border-radius:8px;margin-bottom:15px">${cur}</div>
+
+            <div style="font-size:0.85em;color:#888;margin-bottom:6px">Kayıtlı ağlar (⭐ önce denenir, tutmazsa sıradakiler)</div>
+            <div class="dev-card" style="margin-bottom:15px">${rows}</div>
+
+            <div style="font-size:0.85em;color:#888;margin-bottom:6px">Ağ ekle</div>
+            <div class="dev-card">
+                <div class="dev-card-row">
+                    <select id="wifiSel" class="compact-input" onchange="if(this.value) document.getElementById('wifiSsid').value = this.value">
+                        <option value="">Ağları tara...</option>
+                    </select>
+                    <button class="mini-btn" id="wifiScanBtn" onclick="wifiScan()">🔍 Tara</button>
+                </div>
+                <div class="dev-card-row"><span>SSID</span>
+                    <input type="text" id="wifiSsid" class="compact-input" placeholder="Ağ adı" maxlength="32">
+                </div>
+                <div class="dev-card-row"><span>Şifre</span>
+                    <input type="password" id="wifiPass" class="compact-input" placeholder="Şifre" maxlength="63">
+                    <button class="mini-btn" onclick="const p=document.getElementById('wifiPass'); p.type = p.type === 'password' ? 'text' : 'password'">👁</button>
+                </div>
+                <button class="btn" style="margin-top:8px;width:100%" onclick="wifiAdd()">💾 Kaydet</button>
+                <small style="color:#888;display:block;margin-top:6px">Kaydetmek bağlanmaz - bağlanmak için listede "Bağlan"a bas (HUB yeniden başlar).</small>
+            </div>
+        </div>`;
+    }).catch(() => toast("✗ WiFi bilgisi alınamadı", true));
+}
+
+function wifiScan() {
+    const btn = document.getElementById("wifiScanBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳";
+    let tries = 0;
+    const poll = () => fetch("/wifi_scan").then(r => r.json()).then(j => {
+        if (j.scanning && ++tries < 15) return setTimeout(poll, 1000);
+        const sel = document.getElementById("wifiSel");
+        const nets = (j.networks || []).sort((a, b) => b.rssi - a.rssi);
+        sel.innerHTML = `<option value="">${nets.length} ağ bulundu - seç...</option>` +
+            nets.map(n => `<option value="${escHtml(n.ssid)}">${escHtml(n.ssid)} (${n.rssi} dBm${n.secured ? ', 🔒' : ''})</option>`).join('');
+        btn.disabled = false;
+        btn.textContent = "🔍 Tara";
+    }).catch(() => { btn.disabled = false; btn.textContent = "🔍 Tara"; toast("✗ Tarama başarısız", true); });
+    poll();
+}
+
+function wifiAdd() {
+    const ssid = document.getElementById("wifiSsid").value.trim();
+    const pass = document.getElementById("wifiPass").value;
+    if (!ssid) { toast("✗ SSID gerekli", true); return; }
+    fetch("/wifi_add", { method: "POST", body: new URLSearchParams({ ssid, pass }) })
+        .then(r => r.json()).then(j => {
+            if (!j.ok) throw new Error(j.msg || "kaydedilemedi");
+            toast(`✓ ${ssid} kaydedildi`);
+            renderWifi();
+        })
+        .catch(e => toast(`✗ ${e.message}`, true));
+}
+
+function wifiConnect(idx, ssid) {
+    if (!confirm(`${ssid} ağına bağlanmak için HUB yeniden başlatılsın mı?\n\nBağlanamazsa kayıtlı diğer ağlar denenir. HUB yeni ağda farklı bir IP alabilir (merkezihub.local ile de açılır).`)) return;
+    fetch(`/wifi_connect?idx=${idx}`).then(r => r.json()).then(j => {
+        if (!j.ok) throw new Error();
+        toast(`✓ HUB yeniden başlıyor, ${ssid} denenecek...`);
+    }).catch(() => toast("✗ İşlem başarısız", true));
+}
+
+function wifiDelete(idx, ssid, isCurrent) {
+    const warn = isCurrent ? "\n\nŞu an bu ağa bağlısın - HUB şimdilik bağlı kalır, ama sonraki açılışta bu ağ denenmez." : "";
+    if (!confirm(`${ssid} kayıtlı ağlardan silinsin mi?${warn}`)) return;
+    fetch(`/wifi_delete?idx=${idx}`).then(r => r.json()).then(j => {
+        if (!j.ok) throw new Error();
+        toast(`✓ ${ssid} silindi`);
+        renderWifi();
+    }).catch(() => toast("✗ Silinemedi", true));
+}
+
 function renderNotes() {
     fetch("/get_notes").then(r => r.json()).then(list => {
         NOTES = Array.isArray(list) ? list : [];
@@ -1884,6 +1990,7 @@ function navigate() {
     else if(p === "/weather") document.getElementById("nav3").className = "active";
     else if(p === "/log") document.getElementById("nav4").className = "active";
     else if(p === "/notes") document.getElementById("nav5").className = "active";
+    else if(p === "/wifi") document.getElementById("nav6").className = "active";
 
     // İlgili sayfayı render et
     if(p === "/settings") {
@@ -1894,6 +2001,8 @@ function navigate() {
         fetchDevices().then(renderWeather);
     } else if(p === "/notes") {
         renderNotes();
+    } else if(p === "/wifi") {
+        renderWifi();
     } else if(p === "/device") {
         document.getElementById("nav2").className = "active";
         fetchDevices().then(renderDevice);
