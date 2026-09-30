@@ -1176,6 +1176,9 @@ function renderSettings() {
                         <div class="rssi-value-compact ${getRSSIClass(rssi)}" id="rssi_${i}">${formatRSSI(rssi)}</div>
                         <button class="mini-btn" onclick="refreshRSSI(${i})">🔄</button>
                     </div>
+                    <div class="dev-card-row"><span>Bağlantı</span>
+                        ${linkRow(status, online)}
+                    </div>
                     <div class="dev-card-row"><span>MQTT</span>
                         ${mqttRow(i, status, online)}
                     </div>
@@ -1198,6 +1201,21 @@ function renderSettings() {
 
         document.getElementById("content").innerHTML = html;
     });
+}
+
+// Kopma teshisi (firmware v2.7): acik kalma suresi + WiFi kopma sayisi/son sebebi.
+// Sebep 802.11 reason kodu; 200 = sinyal kaybi (mesafe/parazit), besleme
+// sorununda ise kopma degil yeniden baslama olur (sure sifirlanir).
+const WIFI_REASONS = {2:"kimlik geçersiz", 4:"hareketsizlik", 8:"cihaz ayrıldı", 15:"el sıkışma zaman aşımı",
+    200:"sinyal kaybı", 201:"AP bulunamadı", 202:"kimlik hatası", 203:"ilişkilendirme hatası", 204:"el sıkışma hatası"};
+function linkRow(status, online) {
+    if (!online) return '<small style="color:#666">çevrimdışı</small>';
+    if (status.wifi_drops === undefined) return '<small style="color:#888">firmware eski (v2.7 gerekli)</small>';
+    const u = status.uptime || 0, d = Math.floor(u / 86400), h = Math.floor(u % 86400 / 3600), m = Math.floor(u % 3600 / 60);
+    const up = d ? `${d}g ${h}s` : h ? `${h}s ${m}dk` : `${m}dk`;
+    let txt = `${up} açık · ${status.wifi_drops} kopma`;
+    if (status.wifi_drops > 0) txt += ` (son: ${WIFI_REASONS[status.wifi_reason] || status.wifi_reason})`;
+    return `<small title="kod ${status.wifi_reason}">${txt}</small>`;
 }
 
 // MQTT (genel broker uzerinden disaridan kontrol) - cihaz basina ac/kapat.

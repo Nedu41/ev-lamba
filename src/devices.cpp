@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
+#include <map>
 #include "app_state.h"
 #include "storage.h"
 #include "web_server.h"
@@ -66,6 +67,9 @@ String getDeviceStatusJson(const String& ip) {
       return "{\"r1_state\":\"OFFLINE\",\"r2_state\":\"OFFLINE\",\"mac\":\"OFFLINE\"}";
     }
   }
+
+  // Firmware v2.7+ MAC'i /status icinde veriyor - ikinci HTTP istegine gerek yok
+  if (result.indexOf("\"mac\":") >= 0) return result;
 
   // MAC isteği - ayrı scope ile bellek temizlenir
   {
@@ -155,16 +159,29 @@ static bool followIpChanges() {
 void updateAllDeviceStatuses(void* pvParameters) {
   unsigned long lastFollow = 0;
   const unsigned long FOLLOW_INTERVAL = 60000;  // cevrimdisi cihaz varken en fazla dakikada 1 tarama
+  // Ust uste 2 tur cevap vermeyen cihaz sadece 3 turda bir yoklanir: her
+  // cevrimdisi cihaz turu ~1.6sn uzatiyor, digerlerinin guncellenmesini geciktiriyordu.
+  // IP ile anahtarlanir - IP degisirse (followIpChanges) yeni adres hemen yoklanir.
+  std::map<String, uint8_t> offlineRounds;
+  uint32_t round = 0;
 
   while (1) {
     bool anyOffline = false;
     bool listChanged = false;
+    round++;
     if (doc.is<JsonArray>()) {
       for (JsonObject device : doc.as<JsonArray>()) {
         String name = device["name"] | "";
         String ip   = device["ip"]   | "";
         if (name != "" && ip != "") {
+          uint8_t& misses = offlineRounds[ip];
+          if (misses >= 2 && round % 3 != 0) {
+            anyOffline = true;  // son bilinen OFFLINE durumu yerinde kalir
+            continue;
+          }
           String statusJson = getDeviceStatusJson(ip);
+          bool offline = statusJson.indexOf("\"OFFLINE\"") >= 0;
+          misses = offline ? (misses < 255 ? misses + 1 : misses) : 0;
           StaticJsonDocument<512> tempDoc;  // DÜZELTİLDİ: 1500 yerine 512 (ESP01 yanıtı küçük)
           if (deserializeJson(tempDoc, statusJson) == DeserializationError::Ok) {
             if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
