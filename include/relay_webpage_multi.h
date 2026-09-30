@@ -1684,6 +1684,7 @@ function renderWeather() {
             <div style="display:flex;flex-direction:column;gap:10px">
                 <button class="btn" id="refreshWeatherBtn" onclick="refreshWeather()" style="background:#2196F3">🔄 Hava Durumunu Güncelle</button>
                 <button class="btn" onclick="skyDemo(this)" style="background:#FF9800;color:#000">🌅 Ekranda 24 Saat Demosu (~2 dk)</button>
+                <button class="btn" onclick="weatherDemo(this)" style="background:#03dac6;color:#000">⛈️ Ekranda Hava Demosu (kar, fırtına... ~1 dk)</button>
             </div>
         </div>`;
         
@@ -1698,6 +1699,15 @@ function skyDemo(btn) {
         .then(r => { if (!r.ok) throw new Error(); toast("✓ HUB ekranında 24 saat demosu başladı (~2 dk)"); })
         .catch(() => toast("✗ Demo başlatılamadı", true))
         .finally(() => setTimeout(() => { btn.disabled = false; }, 120000));
+}
+
+// HUB ekraninda tum hava sahnelerini 8'er saniye sirayla gosterir
+function weatherDemo(btn) {
+    btn.disabled = true;
+    fetch("/weather_demo")
+        .then(r => { if (!r.ok) throw new Error(); toast("✓ HUB ekranında hava demosu başladı (~1 dk)"); })
+        .catch(() => toast("✗ Demo başlatılamadı", true))
+        .finally(() => setTimeout(() => { btn.disabled = false; }, 64000));
 }
 
 function autoSaveWeather() {

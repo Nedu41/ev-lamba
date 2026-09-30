@@ -685,6 +685,10 @@ void setupWebServer() {
     startSkyDemo();
     request->send(200, "text/plain", "Gokyuzu demosu basladi (~2 dk)");
   });
+  server.on("/weather_demo", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
+    startWeatherDemo();
+    request->send(200, "text/plain", "Hava demosu basladi (~1 dk)");
+  });
   server.on("/proxy", AsyncWebRequestMethod::HTTP_GET, handleProxy);
   server.on("/get_devices", AsyncWebRequestMethod::HTTP_GET, handleGetDevices);
   server.on("/save_devices", AsyncWebRequestMethod::HTTP_POST,

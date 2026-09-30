@@ -407,6 +407,12 @@ const float SKY_DEMO_SPEED = 12.0f;  // dakika / saniye
 
 void startSkyDemo() { skyDemoReq = true; }
 
+// Hava demosu (/weather_demo): acik -> firtina tum sahneler 8'er sn
+static volatile bool wxDemoReq = false;
+static int wxDemoIdx = -1;
+static uint32_t wxDemoStart = 0;
+void startWeatherDemo() { wxDemoReq = true; }
+
 // Sahnenin kullandigi saat (gece yarisindan beri dakika) - demo acikken sanal saat
 static bool sceneMinutes(float& out) {
   if (skyDemoMin >= 0) { out = skyDemoMin; return true; }
@@ -1274,7 +1280,22 @@ void displayTask(void* pvParameters) {
     }
 
     if (animated) {
-      Scene sc = skyDemoMin >= 0 ? SC_CLEAR : wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
+      // Hava demosu: tum hava tipleri sirayla (gercek saatin gokyuzuyle)
+      static const Scene WX_SEQ[] = {SC_CLEAR, SC_PARTLY, SC_CLOUDY, SC_FOG, SC_DRIZZLE, SC_RAIN, SC_SNOW, SC_THUNDER};
+      static const char* WX_NAME[] = {"Acik", "Parcali", "Kapali", "Sis", "Ciseleme", "Yagmur", "Kar", "Firtina"};
+      const int WX_N = sizeof(WX_SEQ) / sizeof(WX_SEQ[0]);
+      const uint32_t WX_STEP_MS = 8000;
+      if (wxDemoReq) {
+        wxDemoReq = false;
+        wxDemoStart = now;
+        wxDemoIdx = 0;
+      }
+      if (wxDemoIdx >= 0) {
+        wxDemoIdx = (now - wxDemoStart) / WX_STEP_MS;
+        if (wxDemoIdx >= WX_N) wxDemoIdx = -1;
+      }
+      Scene sc = wxDemoIdx >= 0 ? WX_SEQ[wxDemoIdx]
+               : skyDemoMin >= 0 ? SC_CLEAR : wv.ok ? sceneFromCode(wv.code) : SC_CLOUDY;
       static uint32_t lastPalette = 0;
       if (skyDemoReq) {
         skyDemoReq = false;
@@ -1305,6 +1326,13 @@ void displayTask(void* pvParameters) {
       if (skyDemoMin >= 0) {
         char dm[12];
         snprintf(dm, sizeof(dm), "DEMO %02d:%02d", (int)skyDemoMin / 60, (int)skyDemoMin % 60);
+        scene.setTextColor(P_WHITE);
+        scene.setTextDatum(TR_DATUM);
+        scene.drawString(dm, SCENE_W - 8, WIN_TOP + 2, 2);
+        scene.setTextDatum(TL_DATUM);
+      }
+      if (wxDemoIdx >= 0) {
+        String dm = String("DEMO ") + WX_NAME[wxDemoIdx];
         scene.setTextColor(P_WHITE);
         scene.setTextDatum(TR_DATUM);
         scene.drawString(dm, SCENE_W - 8, WIN_TOP + 2, 2);

@@ -10,6 +10,8 @@ void startDisplayTask();
 
 // Canli sahnede 24 saati ~2 dakikada oynatir (tan/kizillik/gece onizleme)
 void startSkyDemo();
+// Tum hava sahnelerini (acik, bulut, sis, yagmur, kar, firtina) 8'er sn gosterir
+void startWeatherDemo();
 
 // AA dunya RSS -> NEWS_TICKER_TEXT (blocking HTTPS, hava gorevinden cagrilir)
 bool fetchNews();
