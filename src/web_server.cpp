@@ -84,6 +84,15 @@ String buildStatusPayload() {
     responseDoc["current_time"] = "N/A";
   }
 
+  // HUB saglik teshisi: kendiliginden yeniden baslama sebebi ve bellek
+  // (PSRAM yok - buyuk bloklar tukenirse NoMemory/cokme)
+  JsonObject hub = responseDoc["hub"].to<JsonObject>();
+  hub["uptime"] = millis() / 1000;
+  hub["reset"] = (int)esp_reset_reason();  // 4=panic, 5=int WDT, 6=task WDT, 9=brownout
+  hub["heap"] = ESP.getFreeHeap();
+  hub["min_heap"] = ESP.getMinFreeHeap();
+  hub["max_block"] = ESP.getMaxAllocHeap();
+
   String output;
   serializeJson(responseDoc, output);
   return output;
@@ -481,6 +490,17 @@ void proxyWorkerTask(void *pvParameters) {
           if ((d["ip"] | String("")) == ip) { devName = d["name"] | ip; break; }
         }
         addEvent(devName, job.relay, action == "on", "web", ok);
+        // Cihazin push'unu beklemeden durumu hemen guncelle - yoksa arada
+        // baska cihazlarin push'uyla giden "status" butonu eski haline
+        // cizip geri donduruyordu.
+        if (ok && xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
+          JsonObject st = CURRENT_STATUS_DOC[devName].as<JsonObject>();
+          if (!st.isNull()) {
+            st[job.relay == 1 ? "r1_state" : "r2_state"] = action == "on" ? "ON" : "OFF";
+            st[job.relay == 1 ? "relay_1" : "relay_2"] = action == "on" ? 1 : 0;
+          }
+          xSemaphoreGive(statusMutex);
+        }
       }
 
       StaticJsonDocument<192> out;
@@ -494,6 +514,7 @@ void proxyWorkerTask(void *pvParameters) {
       AsyncWebSocketClient *c = ws.client(job.wsClientId);
       if (c && c->status() == WS_CONNECTED) c->text(payload);
 
+      if (ok) wsBroadcastStatus();  // diger acik ekranlar (telefon/PC) da aninda gorsun
       setForceRefresh();  // updateAllDeviceStatuses'i hemen uyandirir -> WS "status" push
     } else if (job.kind == ProxyJob::SCAN) {
       // WiFi'de tek multicast sorgu/cevap kolayca kayboluyor (yeni modul ilk

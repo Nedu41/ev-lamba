@@ -109,10 +109,15 @@ bool sendControlSignal(const String& ip, int relay, const String& action, const 
   // ve komut kuyrugu da her cevrimdisi cihaz icin 5sn kilitleniyordu.
   http.setConnectTimeout(800);
   String url = "http://" + ip + "/control?id=" + String(relay) + "&action=" + action + "&src=" + src;
-  http.begin(url);
-  int code = http.GET();
-  http.end();
-  return code == 200;
+  // on/off idempotent - zayif sinyalde kaybolan istek/cevap icin bir kez daha
+  // denemek guvenli (role zaten degistiyse ikinci istek bir sey degistirmez)
+  for (int attempt = 0; attempt < 2; attempt++) {
+    http.begin(url);
+    int code = http.GET();
+    http.end();
+    if (code == 200) return true;
+  }
+  return false;
 }
 
 // "BC:FF:4D:40:3E:0F" / "bcff4d403e0f" -> "bcff4d403e0f"; gecersizse ""

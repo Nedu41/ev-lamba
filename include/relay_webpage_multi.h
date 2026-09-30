@@ -653,6 +653,8 @@ const daysName = ["Pt","Sa","Ça","Pe","Cu","Ct","Pz"];
 let ws = null;
 let wsReqCounter = 1;
 const pendingControlRequests = {};
+// ip_role -> {until, state}: komut bittikten sonra kisa sure eski durumu yoksay
+const controlHold = {};
 
 function connectWS() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -678,7 +680,8 @@ function connectWS() {
     };
 }
 
-function sendControl(ip, relay, action, timeoutMs = 3000) {
+// 5sn: sunucu zayif sinyalli cihaza bir kez yeniden deniyor (2 x ~1.8sn)
+function sendControl(ip, relay, action, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             reject(new Error("WS bağlı değil"));
@@ -948,8 +951,15 @@ function applyDomUpdates() {
                 const state = s[`r${r}_state`] || "OFFLINE";
                 const btn = document.getElementById("b"+r+"_"+i);
                 const prog = document.getElementById("p"+r+"_"+i);
+                // Komut suruyorsa ya da yeni bitti ve eski durum gelmeye devam
+                // ediyorsa butona dokunma (geri donup tekrar degisme titremesi)
+                const hold = controlHold[dev.ip + "_" + r];
+                const skipBtn = btn && (btn.dataset.pending === "1" ||
+                    (hold && Date.now() < hold.until && state !== hold.state));
 
-                if(state === "OFFLINE") {
+                if (skipBtn) {
+                    // buton oldugu gibi kalir
+                } else if(state === "OFFLINE") {
                     if(btn) { 
                         btn.textContent = "❌ HATA"; 
                         btn.className = "btn error"; 
@@ -1012,31 +1022,34 @@ function getMask(i) {
 function toggle(i, r) {
     const dev = DEVICES[i];
     const btn = document.getElementById("b"+r+"_"+i);
+    if (btn.dataset.pending === "1") return;  // cift tiklama ikinci komut gondermesin
     const originalText = btn.textContent;
     const originalClass = btn.className;
 
     // Optimistik UI
     btn.textContent = "⏳";
     btn.disabled = true;
+    btn.dataset.pending = "1";
 
     // Röle durumunu belirle
     const action = originalText.includes("AÇIK") ? "off" : "on";
 
     sendControl(dev.ip, parseInt(r), action)
         .then(res => {
-            if (!res.ok) throw new Error("cihaz yanıt vermiyor, çevrimdışı olabilir");
+            if (!res.ok) throw new Error("cihaz yanıt vermiyor");
+            const state = action === "on" ? "ON" : "OFF";
+            controlHold[dev.ip + "_" + r] = { until: Date.now() + 3000, state };
+            if (STATUS[dev.name]) STATUS[dev.name][`r${r}_state`] = state;
             btn.textContent = action === "on" ? "✅ AÇIK" : "⭕ KAPALI";
             btn.className = action === "on" ? "btn on" : "btn off";
-            // setForceRefresh() sunucu tarafinda zaten tetiklendi - taze
-            // "status" push'u bu round-trip'le birlikte gelecek, ekstra
-            // setTimeout(update,...) gerekmiyor.
         })
         .catch(error => {
             btn.textContent = originalText;
             btn.className = originalClass;
-            alert(`Hata: ${dev.name} ile iletişim kurulamadı. (${error.message})`);
+            // alert() sayfayi kapatilana kadar donduruyordu - toast bloklamaz
+            toast(`✗ ${dev.name}: ${error.message}`, true);
         })
-        .finally(() => { btn.disabled = false; });
+        .finally(() => { btn.disabled = false; delete btn.dataset.pending; });
 }
 
 // Zamanlayıcı - alan degisince otomatik kaydedilir (KAYDET butonu yok)
