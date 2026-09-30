@@ -112,8 +112,15 @@ typedef WebServer WebServerT;
 typedef ESP8266WebServer WebServerT;
 #define HOST_PREFIX "esp01-"
 #define SETUP_AP "ESP01_SETUP"
+#ifdef BOARD_ESP07
+// ESP-07: GPIO0/2/15 acilis (strapping), 1/3 seri, 6-11 flas, 16 deep-sleep pini
+// - hicbiri kullanilmaz. 4 ve 5 serbest, acilista rolesiz (glitch yok).
+#define RELAY_1_PIN 4
+#define RELAY_2_PIN 5
+#else
 #define RELAY_1_PIN 0
 #define RELAY_2_PIN 2
+#endif
 #endif
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
