@@ -1,7 +1,7 @@
 /*
  * ============================================================
  *  ESP01 Röle Kontrol Firmware
- *  Versiyon : v2.8.1  (saat EEPROM kaydi saatte bir; UDP durum push; bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
+ *  Versiyon : v2.9.0  (TX gucu ayari /txpower; push 15sn; saat EEPROM kaydi saatte bir; UDP durum push; bloklamayan WiFi/MQTT/NTP, /status'ta kopma teshisi; MQTT cihaz basina ac/kapat - /mqtt; olay tabanli zamanlayici; mDNS+OTA; derleme: PlatformIO, src/)
  *  Tarih     : Şubat 2026
  * ============================================================
  *
@@ -123,7 +123,7 @@ typedef ESP8266WebServer WebServerT;
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 
-#define FW_VERSION "2.8.1"  // /status "fw" alani
+#define FW_VERSION "2.9.0"  // /status "fw" alani
 
 // Varsayilan WiFi (sifre koda gomulmesin diye ayri dosyada, paylasilmaz)
 #if __has_include("secrets.h")
@@ -158,6 +158,25 @@ unsigned long lastNetCheck = 0;
 #define RELAY_2_STATE_ADDR   401  // 401: Röle 2 son durumu
 #define MQTT_ENABLED_ADDR    402  // 402: MQTT_DISABLED_MAGIC = kapali, baska her deger = acik
 #define MQTT_DISABLED_MAGIC  0xA5 // bos/silinmis EEPROM (0x00/0xFF) varsayilan olarak ACIK kalsin
+#define TX_POWER_ADDR        403  // 403: WiFi gonderme gucu, 0.25 dBm biriminde; aralik disi = varsayilan
+
+// v2.9: gonderme gucu HUB Cihazlar sayfasindan ayarlanir (0.25 dBm birimi,
+// ESP32 esp_wifi_set_max_tx_power ile ayni). Guc sadece GONDERIMI etkiler;
+// yuksek guc zayif beslemede brownout'a yol acabilir.
+#ifdef ESP32
+// SuperMini'nin zayif anteninde tam guc bazi kartlarda baglanmayi bozuyor
+// (bilinen sorun) - varsayilan dusuk, build_flags ile degistirilebilir.
+#ifndef C3_TX_POWER
+#define C3_TX_POWER WIFI_POWER_8_5dBm
+#endif
+#define TX_POWER_DEFAULT_Q ((uint8_t)C3_TX_POWER)
+#define TX_POWER_MAX_Q     84   // 21 dBm
+#else
+#define TX_POWER_DEFAULT_Q 82   // 20.5 dBm = ESP8266 maksimumu
+#define TX_POWER_MAX_Q     82
+#endif
+#define TX_POWER_MIN_Q     8    // 2 dBm
+uint8_t txPowerQ = TX_POWER_DEFAULT_Q;
 
 // ---------------------- MQTT DEĞİŞKENLERİ ----------------------
 char mqtt_server[64];
@@ -189,7 +208,7 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 3 * 3600, 60000);
 
 // v2.8: durum push - HUB'daki STATUS_PUSH_PORT ile ayni olmali
 #define STATUS_PUSH_PORT     4211
-#define STATUS_PUSH_INTERVAL 30000
+#define STATUS_PUSH_INTERVAL 15000  // v2.9: 30 -> 15sn, kapanan cihaz HUB ekraninda daha cabuk kopuk gorunsun
 WiFiUDP pushUdp;
 IPAddress hubIp;  // bilinmiyorsa (0.0.0.0) push yerel aga yayin olarak gider
 volatile bool pushPending = true;  // acilista hemen bildir
@@ -547,6 +566,8 @@ String buildStatusJson() {
     doc["uptime"]      = millis() / 1000;
     doc["wifi_drops"]  = wifiDrops;
     doc["wifi_reason"] = wifiLastReason;
+    doc["tx_power"]    = txPowerQ / 4.0f;
+    doc["tx_max"]      = TX_POWER_MAX_Q / 4.0f;
 
     if (timeValid) {
         doc["current_time"] = currentEpoch;
@@ -808,6 +829,24 @@ void setupServer() {
         server.send(200, "application/json", out);
     });
 
+    // v2.9: /txpower?dbm=15 -> kaydet + hemen uygula; argumansiz sadece okur
+    server.on("/txpower", HTTP_GET, []() {
+        if (server.hasArg("dbm")) {
+            int q = (int)lroundf(server.arg("dbm").toFloat() * 4);
+            if (q < TX_POWER_MIN_Q || q > TX_POWER_MAX_Q) {
+                server.send(400, "application/json", "{\"error\":\"aralik disi\"}");
+                return;
+            }
+            if (q != txPowerQ) {
+                txPowerQ = q;
+                saveTxPower();
+                applyTxPower();
+                Serial.printf("TX gucu: %.2f dBm\n", txPowerQ / 4.0f);
+            }
+        }
+        server.send(200, "application/json", String("{\"tx_power\":") + String(txPowerQ / 4.0f, 2) + "}");
+    });
+
     server.on("/eeprom_clr", HTTP_GET, []() {
         Serial.println("EEPROM Temizleniyor...");
         EEPROM.begin(EEPROM_SIZE);
@@ -947,24 +986,39 @@ void setupWiFiEvents() {
 }
 #endif
 
+void applyTxPower() {
+#ifdef ESP32
+    WiFi.setTxPower((wifi_power_t)txPowerQ);
+#else
+    WiFi.setOutputPower(txPowerQ / 4.0f);
+#endif
+}
+
+void loadTxPower() {
+    EEPROM.begin(EEPROM_SIZE);
+    uint8_t q = EEPROM.read(TX_POWER_ADDR);
+    EEPROM.end();
+    txPowerQ = (q >= TX_POWER_MIN_Q && q <= TX_POWER_MAX_Q) ? q : TX_POWER_DEFAULT_Q;
+}
+
+void saveTxPower() {
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.write(TX_POWER_ADDR, txPowerQ);
+    EEPROM.commit();
+    EEPROM.end();
+}
+
 // ---------------------- SETUP & LOOP ----------------------
 void setup() {
     Serial.begin(115200);
-    // 20.5 dBm = ESP8266 maksimumu (eskiden 19). Sadece gonderimi guclendirir;
-    // zayif beslemede yayin akim tepesi artar -> brownout riski (bkz. "reset" alani)
+    loadTxPower();
 #ifdef ESP32
-    // SuperMini'nin zayif anteninde tam guc bazi kartlarda baglanmayi bozuyor
-    // (bilinen sorun) - build_flags ile degistirilebilir.
-#ifndef C3_TX_POWER
-#define C3_TX_POWER WIFI_POWER_8_5dBm
-#endif
     WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(C3_TX_POWER);
     WiFi.setSleep(false);
 #else
-    WiFi.setOutputPower(20.5);
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
+    applyTxPower();
     WiFi.setAutoReconnect(true);
     setupWiFiEvents();
     delay(1000);
@@ -1017,7 +1071,8 @@ void setup() {
         Serial.print(rssi);
         Serial.println(" dBm");
     }
-  
+    applyTxPower();  // WiFiManager/baglanma sirasinda sifirlanmis olabilir
+
     String mac = WiFi.macAddress();
     mac.replace(":", "");
     mac.toLowerCase();

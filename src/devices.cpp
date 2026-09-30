@@ -163,7 +163,7 @@ static bool followIpChanges() {
 // Paketler yalnizca durum gorevinde islenir - cihaz listesine ayni gorevden erisilsin.
 static WiFiUDP pushRx;
 static std::map<String, unsigned long> lastPushAt;  // cihaz adi -> millis
-const unsigned long PUSH_FRESH_MS = 45000;          // 30sn nabiz + 1 kayip paket payi
+const unsigned long PUSH_FRESH_MS = 35000;          // 15sn nabiz (v2.9) + 1 kayip paket payi
 
 static bool pushFresh(const String& name) {
   auto it = lastPushAt.find(name);
@@ -253,7 +253,9 @@ void updateAllDeviceStatuses(void* pvParameters) {
           misses = offline ? (misses < 255 ? misses + 1 : misses) : 0;
           // Tek cevapsiz yoklama cihazi kopuk gostermesin (zayif sinyalde ara sira
           // zaman asimi oluyor, cihaz aslinda bagli) - son bilinen durum kalir.
-          if (offline && misses == 1) continue;
+          // Push'u kesilmis cihazda bu zaten ikinci isaret (nabiz da gelmedi) -
+          // hemen kopuk goster; yoksa fisi cekilen cihaz ~1dk bagli gorunuyordu.
+          if (offline && misses == 1 && !lastPushAt.count(name)) continue;
           StaticJsonDocument<512> tempDoc;  // DÜZELTİLDİ: 1500 yerine 512 (ESP01 yanıtı küçük)
           if (deserializeJson(tempDoc, statusJson) == DeserializationError::Ok) {
             if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {

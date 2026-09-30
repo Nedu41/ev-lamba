@@ -1179,6 +1179,9 @@ function renderSettings() {
                     <div class="dev-card-row"><span>Bağlantı</span>
                         ${linkRow(status, online)}
                     </div>
+                    <div class="dev-card-row"><span>Güç</span>
+                        ${txRow(i, status, online)}
+                    </div>
                     <div class="dev-card-row"><span>MQTT</span>
                         ${mqttRow(i, status, online)}
                     </div>
@@ -1216,6 +1219,39 @@ function linkRow(status, online) {
     let txt = `${up} açık · ${status.wifi_drops} kopma`;
     if (status.wifi_drops > 0) txt += ` (son: ${WIFI_REASONS[status.wifi_reason] || status.wifi_reason})`;
     return `<small title="kod ${status.wifi_reason}">${txt}</small>`;
+}
+
+// WiFi gonderme gucu (firmware v2.9). Sadece cihazin gonderimini etkiler:
+// uzak cihazda artirmak baglantiyi guclendirir, ama zayif beslemede yuksek guc
+// yeniden baslamaya (brownout) yol acabilir - o zaman dusur.
+const TX_STEPS = [8.5, 11, 13, 15, 17, 19.5, 20.5];
+function txRow(i, status, online) {
+    if (!online) return '<small style="color:#666">çevrimdışı</small>';
+    if (status.tx_power === undefined) return '<small style="color:#888">firmware eski (v2.9 gerekli)</small>';
+    const cur = status.tx_power, max = status.tx_max || 20.5;
+    const steps = TX_STEPS.filter(v => v <= max);
+    if (!steps.includes(cur)) steps.push(cur), steps.sort((a, b) => a - b);
+    return `<select class="compact-input" onchange="setDeviceTx(${i}, this)">` +
+        steps.map(v => `<option value="${v}" ${v === cur ? 'selected' : ''}>${v} dBm${v === max ? ' (en yüksek)' : ''}</option>`).join('') +
+        `</select>`;
+}
+
+function setDeviceTx(i, sel) {
+    const d = DEVICES[i], want = parseFloat(sel.value);
+    const prev = STATUS[d.name] ? STATUS[d.name].tx_power : want;
+    sel.disabled = true;
+    fetch(`/proxy?ip=${encodeURIComponent(d.ip)}&url=${encodeURIComponent('/txpower?dbm=' + want)}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(j => {
+            if (Math.abs(j.tx_power - want) > 0.01) throw new Error();
+            if (STATUS[d.name]) STATUS[d.name].tx_power = j.tx_power;
+            toast(`✓ ${d.name}: güç ${j.tx_power} dBm`);
+        })
+        .catch(() => {
+            sel.value = prev;
+            toast(`✗ ${d.name}: güç ayarlanamadı (çevrimdışı ya da firmware eski)`, true);
+        })
+        .finally(() => { sel.disabled = false; });
 }
 
 // MQTT (genel broker uzerinden disaridan kontrol) - cihaz basina ac/kapat.
