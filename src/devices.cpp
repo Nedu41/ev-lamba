@@ -183,10 +183,29 @@ static bool handleStatusPushes(bool& listChanged) {
     String mac = normMac(tempDoc["mac"] | "");
     if (!mac.length() || !doc.is<JsonArray>()) continue;
     String srcIp = pushRx.remoteIP().toString();
+    // Once MAC ile ara; bulunamazsa MAC'i henuz ogrenilmemis (hic cevrimici
+    // gorulmemis) kaydi IP'den tani - cihaz acilir acilmaz ekrana gelsin.
+    // MAC'i kayitli ama farkli olan kayit IP eslesse de alinmaz (IP baska
+    // cihaza gecmis olabilir).
+    JsonObject match;
     for (JsonObject device : doc.as<JsonArray>()) {
-      if ((device["mac"] | String("")) != mac) continue;  // listede olmayan cihaz yoksayilir
+      if ((device["mac"] | String("")) == mac) { match = device; break; }
+    }
+    if (match.isNull()) {
+      for (JsonObject device : doc.as<JsonArray>()) {
+        if ((device["mac"] | String("")).length() == 0 && (device["ip"] | String("")) == srcIp) {
+          match = device;
+          match["mac"] = mac;
+          listChanged = true;
+          Serial.printf("[Push] %s MAC ogrenildi: %s\n", match["name"] | "", mac.c_str());
+          break;
+        }
+      }
+    }
+    if (!match.isNull()) {  // listede olmayan cihaz yoksayilir
+      JsonObject device = match;
       String name = device["name"] | "";
-      if (!name.length()) break;
+      if (!name.length()) continue;
       if (xSemaphoreTake(statusMutex, MUTEX_TIMEOUT) == pdTRUE) {
         CURRENT_STATUS_DOC[name].set(tempDoc);
         xSemaphoreGive(statusMutex);
@@ -198,7 +217,6 @@ static bool handleStatusPushes(bool& listChanged) {
         listChanged = true;
       }
       updated = true;
-      break;
     }
   }
   return updated;
