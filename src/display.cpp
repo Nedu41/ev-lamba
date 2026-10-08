@@ -446,7 +446,7 @@ static SkyTime skyTime() {
   float rise = wv.sunrise.substring(0, 2).toInt() * 60 + wv.sunrise.substring(3, 5).toInt();
   float set = wv.sunset.substring(0, 2).toInt() * 60 + wv.sunset.substring(3, 5).toInt();
   if (set <= rise) return s;
-  const float PEAK = 50.0f, RATE = 0.2f;
+  const float PEAK = 50.0f, RATE = 0.2f, EVE_RATE = 0.5f;
   s.valid = true;
   s.noonH = (rise + set) / 120.0f;
   if (now >= rise && now <= set) {
@@ -457,7 +457,7 @@ static SkyTime skyTime() {
     s.elev = -RATE * (rise - now);
     s.dayFrac = 0;
   } else {
-    s.elev = -RATE * (now - set);
+    s.elev = -EVE_RATE * (now - set);  // aksam kizilligi sabahtan daha cabuk sonsun
     s.evening = true;
     s.dayFrac = 1;
   }
@@ -809,7 +809,7 @@ static bool moonPos(const SkyTime& st, float phase, int& x, int& y) {
   float ha = nowH - transit;
   if (ha > 12) ha -= 24;
   if (ha < -12) ha += 24;
-  const float HALF = 6.2f;  // ufuk ustunde kalma yarisi (saat)
+  const float HALF = 7.0f;  // ufuk ustunde kalma yarisi (saat)
   if (fabsf(ha) > HALF + 0.3f) return false;
   arcPos((ha + HALF) / (2 * HALF), x, y);
   return true;
