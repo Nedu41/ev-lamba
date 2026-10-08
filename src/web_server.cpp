@@ -335,8 +335,9 @@ void applyWeatherConfig(AsyncWebServerRequest *request, const String& body) {
     // Diğer ayar değişim kontrolü
     // NOT: sol taraf da "| varsayilan" ile okunuyor - ArduinoJson v7'de ham
     // MemberProxy'yi cast'siz != ile karsilastirmak private kopya ctor hatasi veriyordu.
-    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || newTargets != oldTargets || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f) || (inDoc["light_threshold"] | 60) != (WEATHER_CONFIG_DOC["light_threshold"] | 60)) {
+    if ((inDoc["active"] | false) != (WEATHER_CONFIG_DOC["active"] | false) || newTargets != oldTargets || (inDoc["threshold"] | 3) != (WEATHER_CONFIG_DOC["threshold"] | 3) || (inDoc["action"] | "") != (WEATHER_CONFIG_DOC["action"] | "") || (inDoc["wind_threshold"] | 15.0f) != (WEATHER_CONFIG_DOC["wind_threshold"] | 15.0f) || (inDoc["light_threshold"] | 60) != (WEATHER_CONFIG_DOC["light_threshold"] | 60) || (inDoc["daylight_window"] | true) != (WEATHER_CONFIG_DOC["daylight_window"] | true)) {
       configChanged = true;
+      WEATHER_CONFIG_DOC["daylight_window"] = inDoc["daylight_window"] | true;
       WEATHER_CONFIG_DOC["active"] = inDoc["active"];
       WEATHER_CONFIG_DOC["targets"].set(inDoc["targets"]);
       WEATHER_CONFIG_DOC["threshold"] = inDoc["threshold"];

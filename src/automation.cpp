@@ -34,9 +34,18 @@ void weatherControlLogic(int currentMinute) {
   int sunriseMin = sunriseStr.substring(0, 2).toInt() * 60 + sunriseStr.substring(3, 5).toInt();
   int sunsetMin  = sunsetStr.substring(0, 2).toInt() * 60 + sunsetStr.substring(3, 5).toInt();
 
-  bool isDaytime = (sunriseMin < sunsetMin)
-                   ? (currentMinute >= sunriseMin && currentMinute < sunsetMin)
-                   : (currentMinute >= sunriseMin || currentMinute < sunsetMin);
+  // Karanlik otomasyonu penceresi: aciksa gun dogumundan 1 saat sonra ile gun
+  // batimindan 1 saat once arasi (sabah alacakaranlik / aksam golgesinde
+  // gereksiz yanmasin); kapaliysa eskisi gibi gun dogumu-batimi arasi.
+  bool windowOn = WEATHER_CONFIG_DOC["daylight_window"] | true;
+  int winStart = sunriseMin, winEnd = sunsetMin;
+  if (windowOn) {
+    winStart = (sunriseMin + 60) % 1440;
+    winEnd   = (sunsetMin - 60 + 1440) % 1440;
+  }
+  bool isDaytime = (winStart < winEnd)
+                   ? (currentMinute >= winStart && currentMinute < winEnd)
+                   : (currentMinute >= winStart || currentMinute < winEnd);
 
   int lightnessScore = CURRENT_WEATHER_DOC["lightness_score"] | 0;
   int threshold       = WEATHER_CONFIG_DOC["threshold"]   | 3;

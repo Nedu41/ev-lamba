@@ -222,6 +222,8 @@ void loadWeatherConfig() {
   // kapali 11:30'da 88 W/m2 ("cok karanlik degil"), acik ogle ~600-700.
   if (!WEATHER_CONFIG_DOC.containsKey("light_threshold")) WEATHER_CONFIG_DOC["light_threshold"] = 60;
   if (!WEATHER_CONFIG_DOC.containsKey("action")) WEATHER_CONFIG_DOC["action"] = "ON";
+  // Karanlik otomasyonu sadece gun dogumu+1sa .. gun batimi-1sa arasinda calissin
+  if (!WEATHER_CONFIG_DOC.containsKey("daylight_window")) WEATHER_CONFIG_DOC["daylight_window"] = true;
 
   // YENİ EKLEME: Rüzgar Hızı Eşiği (Km/s)
   if (!WEATHER_CONFIG_DOC.containsKey("wind_threshold")) WEATHER_CONFIG_DOC["wind_threshold"] = 15.0f;

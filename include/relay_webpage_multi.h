@@ -1704,6 +1704,7 @@ function renderWeather() {
 
             <!-- Ayarlar Formu - her alan degisince otomatik kaydedilir -->
             <table id="weatherForm" onchange="autoSaveWeather()">
+                <tr><td>Karanlıkta yanma saat aralığı:<br><small style="color:#888">Açık: gün doğumu+1sa → gün batımı-1sa<br>Kapalı: gün doğumu → gün batımı</small></td><td><label><input type="checkbox" id="w_daylight_window" ${c.daylight_window === false ? '' : 'checked'}> Aktif</label></td></tr>
                 <tr><td>Rüzgar Eşiği (Km/s):</td><td><input type="number" step="0.1" id="w_wind_threshold" placeholder="15.0" value="${c.wind_threshold||'15.0'}"></td></tr>
                 <tr><td>Şehir:</td><td><input type="text" id="w_city" placeholder="İstanbul" value="${c.city||''}"></td></tr>
                 <tr><td>İlçe:</td><td><input type="text" id="w_district" placeholder="Kadıköy" value="${c.district||''}"></td></tr>
@@ -1765,6 +1766,7 @@ function saveWeather() {
         threshold: WEATHER_CONFIG.threshold || 3,  // isinim verisi yoksa yedek (eski bulut skoru)
         light_threshold: WEATHER_CONFIG.light_threshold || 60,
         action: WEATHER_CONFIG.action || "ON",
+        daylight_window: document.getElementById('w_daylight_window').checked,
         wind_threshold: parseFloat(document.getElementById('w_wind_threshold').value),
         city: document.getElementById('w_city').value.trim(),
         district: document.getElementById('w_district').value.trim(),
