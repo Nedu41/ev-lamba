@@ -1,0 +1,16 @@
+{
+  "name": "ESP32 DevKit + ILI9341 TFT 2.8\" (240x320)",
+  "version": "6.8.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "../firmware/esp32-ili9341-tft.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

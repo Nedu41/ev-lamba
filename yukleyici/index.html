@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Firmware Yükleyici</title>
+<style>
+  :root {
+    --bg: #14141a; --kart: #1f1f28; --dugme: #2c2c38; --cerceve: #000;
+    --yazi: #dadae4; --soluk: #9a9aae; --mor: #a070ff; --pembe: #ff4f9a; --yesil: #2bff8a; --kirmizi: #ff4040;
+  }
+  @media (prefers-color-scheme: light) { :root { --bg: #14141a; } }  /* tema her zaman koyu */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--yazi); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { color: var(--mor); margin: 8px 0 4px; font-size: 1.7rem; }
+  h2 { color: var(--pembe); font-size: 1.15rem; margin: 22px 0 8px; }
+  p.alt { color: var(--soluk); margin: 0 0 12px; }
+  .kutu { background: var(--kart); border: 3px solid var(--cerceve); border-radius: 12px; padding: 14px; }
+  .izgara { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .cihaz { background: var(--dugme); color: var(--yazi); border: 3px solid var(--cerceve); border-radius: 10px; padding: 10px 12px;
+           text-align: left; cursor: pointer; font: inherit; }
+  .cihaz b { display: block; font-size: 1rem; }
+  .cihaz small { color: var(--soluk); }
+  .cihaz.secili { background: var(--mor); color: #0e0e14; box-shadow: 0 0 18px var(--mor); }
+  .cihaz.secili small { color: #1d1030; }
+  .etiket { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #000; color: var(--yesil); font-size: .8rem; margin-right: 6px; }
+  #detay h3 { margin: 0 0 6px; color: var(--yazi); }
+  #detay dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 10px 0; }
+  #detay dt { color: var(--soluk); }
+  #detay dd { margin: 0; }
+  .uyari { border-color: var(--kirmizi); color: #ffd6dc; background: #3a1020; margin-top: 12px; }
+  .yukle { margin-top: 14px; }
+  .yukle button { background: var(--yesil); color: #0e0e14; border: 3px solid var(--cerceve); border-radius: 10px; padding: 12px 22px;
+                  font: 700 1.05rem system-ui; cursor: pointer; box-shadow: 0 0 16px rgba(43,255,138,.5); }
+  .yukle button[disabled] { background: var(--dugme); color: var(--soluk); box-shadow: none; cursor: not-allowed; }
+  footer { color: var(--soluk); font-size: .85rem; margin: 26px 0 8px; }
+  a { color: var(--mor); }
+  ol li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Firmware Yükleyici</h1>
+  <p class="alt">Cihazını seç, USB ile bağla, tarayıcıdan yaz. Program kurmak gerekmez.</p>
+
+  <div class="kutu" id="destek" hidden>
+    Bu tarayıcı USB seri bağlantısını (Web Serial) desteklemiyor. <b>Chrome</b> veya <b>Edge</b> (bilgisayarda) ile açın.
+  </div>
+
+  <h2>1. Cihazı seç</h2>
+  <div id="liste"></div>
+
+  <h2>2. Yaz</h2>
+  <div class="kutu" id="detay">Önce yukarıdan bir cihaz seçin.</div>
+
+  <h2>Nasıl çalışır?</h2>
+  <div class="kutu">
+    <ol>
+      <li>Kartı USB ile bilgisayara bağlayın (gerekirse kartın bağlantı notuna bakın).</li>
+      <li>Cihazı seçin, <b>Yükle</b>'ye basın, açılan pencereden kartın <b>COM (seri) portunu</b> seçin.</li>
+      <li>"Temizle" seçeneğini işaretlerseniz kart tamamen silinir (ilk kurulum için önerilir; eski WiFi ve ayarlar gider).</li>
+      <li>Yazma bitince kart yeniden başlar. Röle düğümleri <b>ESP01_SETUP</b> (C3: <b>C3_SETUP</b>, ESP32: <b>ESP32_SETUP</b>, S3: <b>S3_SETUP</b>) adlı bir WiFi ağı açar; telefondan bağlanıp evin WiFi'sini seçin. CrowPanel HUB kurulumu ekrandan yapılır.</li>
+    </ol>
+  </div>
+  <footer>
+    Yükleme <a href="https://esphome.github.io/esp-web-tools/" target="_blank" rel="noopener">ESP Web Tools</a> ile yapılır (Apache-2.0). İmajlar bu depodaki <code>firmware/</code> klasöründedir.
+  </footer>
+</main>
+
+<script src="cihazlar.js"></script>
+<script type="module" src="vendor/esp-web-tools/install-button.js"></script>
+<script>
+  if (!('serial' in navigator)) document.getElementById('destek').hidden = false;
+  let secili = null, veri = null;
+
+  function kartlar() {
+    const kok = document.getElementById('liste');
+    kok.innerHTML = '';
+    const gruplar = {};
+    veri.cihazlar.forEach(c => (gruplar[c.grup] = gruplar[c.grup] || []).push(c));
+    for (const g in gruplar) {
+      const b = document.createElement('p');
+      b.className = 'alt';
+      b.textContent = g;
+      b.style.margin = '10px 0 6px';
+      kok.appendChild(b);
+      const iz = document.createElement('div');
+      iz.className = 'izgara';
+      gruplar[g].forEach(c => {
+        const d = document.createElement('button');
+        d.className = 'cihaz';
+        d.id = 'c-' + c.id;
+        d.innerHTML = '<b></b><small></small>';
+        d.firstChild.textContent = c.ad;
+        d.lastChild.textContent = c.cip + (c.pinler ? ' · ' + c.pinler : '');
+        d.onclick = () => sec(c.id);
+        iz.appendChild(d);
+      });
+      kok.appendChild(iz);
+    }
+  }
+
+  function sec(id) {
+    secili = veri.cihazlar.find(c => c.id === id);
+    document.querySelectorAll('.cihaz').forEach(e => e.classList.toggle('secili', e.id === 'c-' + id));
+    const c = secili, k = document.getElementById('detay');
+    k.innerHTML = '<h3></h3><span class="etiket"></span><span class="etiket"></span><p></p><dl></dl>';
+    k.querySelector('h3').textContent = c.ad;
+    const et = k.querySelectorAll('.etiket');
+    et[0].textContent = c.cip;
+    et[1].textContent = 'sürüm ' + (c.surum || '-');
+    k.querySelector('p').textContent = c.aciklama || '';
+    const dl = k.querySelector('dl');
+    const ekle = (a, b) => { if (!b) return; const t = document.createElement('dt'), d = document.createElement('dd'); t.textContent = a; d.textContent = b; dl.append(t, d); };
+    ekle(c.grup.indexOf('Merkezi') === 0 ? 'Pinler' : 'Röle pinleri', c.pinler);
+    ekle('Bağlantı', c.baglanti);
+    ekle('İmaj', c.dosya);
+    if (/ASLA|UYARI/.test(c.baglanti || '')) {
+      const u = document.createElement('div');
+      u.className = 'kutu uyari';
+      u.textContent = c.baglanti;
+      k.appendChild(u);
+    }
+    const y = document.createElement('div');
+    y.className = 'yukle';
+    y.innerHTML = '<esp-web-install-button><button slot="activate">Yükle</button><span slot="unsupported">Bu tarayıcı desteklenmiyor: Chrome veya Edge kullanın.</span><span slot="not-allowed">Yükleme yalnızca HTTPS bir sayfadan çalışır.</span></esp-web-install-button>';
+    y.firstChild.setAttribute('manifest', 'manifests/' + c.id + '.json');
+    const pn = document.createElement('p');
+    pn.className = 'alt';
+    pn.innerHTML = '<b>COM port:</b> Yükle\'ye basınca tarayıcı bir pencere açar; listeden kartınızın <b>seri portunu</b> (örn. "USB-SERIAL CH340", "CP210x", "USB JTAG/serial") seçip <b>Bağlan</b>\'a basın. Hangisi olduğunu bilmiyorsanız kartı çıkarıp tekrar takın: listede beliren/kaybolan port sizindir. Liste boşsa kablo yalnızca şarj kablosu olabilir ya da sürücü eksiktir.';
+    y.appendChild(pn);
+    k.appendChild(y);
+    history.replaceState(null, '', '#' + id);
+  }
+
+  function basla(j) {
+    veri = j;
+    kartlar();
+    const h = location.hash.slice(1);
+    if (h && veri.cihazlar.some(c => c.id === h)) sec(h);
+  }
+  if (location.protocol === 'file:') {
+    const u = document.getElementById('destek');
+    u.hidden = false;
+    u.innerHTML = 'Sayfa dosya olarak açıldı: liste görünür ama <b>Yükle çalışmaz</b>. <b>baslat.bat</b> dosyasına çift tıklayın (yerel sunucu açar) ya da siteyi GitHub Pages adresinden açın.';
+  }
+  if (window.CIHAZLAR) basla(window.CIHAZLAR);
+  else fetch('cihazlar.json').then(r => r.json()).then(basla);
+</script>
+</body>
+</html>

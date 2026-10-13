@@ -1,0 +1,16 @@
+{
+  "name": "ESP32-C3 SuperMini",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C3",
+      "parts": [
+        {
+          "path": "../firmware/c3_supermini.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

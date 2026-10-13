@@ -1,0 +1,114 @@
+window.CIHAZLAR = {
+ "surum": "2026-10-13",
+ "cihazlar": [
+  {
+   "id": "hub-crowpanel",
+   "grup": "Merkezi cihaz (HUB)",
+   "ad": "Elecrow CrowPanel 7.0\" (ESP32-S3)",
+   "cip": "ESP32-S3",
+   "dosya": "crowpanel-7in.factory.bin",
+   "surum": "7.2.1",
+   "aciklama": "Dokunmatik ekranlı merkezi cihaz: lambalar, hava, uyarılar, yapay zeka efektleri. İlk açılışta ekrandan WiFi kurulumu yapılır. Telegram ve hava konumu Ayar sayfasından girilir.",
+   "baglanti": "USB-C kabloyu kartın USB girişine takın (CH340 seri çipi; sürücü gerekirse yükleyin)."
+  },
+  {
+   "id": "hub-esp32-tft",
+   "grup": "Merkezi cihaz (HUB)",
+   "ad": "ESP32 DevKit + ILI9341 TFT 2.8\" (240x320)",
+   "cip": "ESP32",
+   "dosya": "esp32-ili9341-tft.factory.bin",
+   "surum": "6.8.0",
+   "pinler": "TFT: MISO 12, MOSI 13, SCLK 14, CS 15, DC 2, BL 21",
+   "aciklama": "Küçük ekranlı merkezi cihaz (canlı hava sahnesi, haber bandı, web arayüzü). WiFi kurulumu MerkeziHUB_SETUP ağından yapılır. Telegram bilgisi derleme zamanında girilir: bu hazır imajda kapalıdır, gerekirse kaynak koddan derleyin.",
+   "baglanti": "USB ile yüklenir (CP210x/CH340). Bağlanamazsa BOOT düğmesine basılı tutarak yeniden deneyin."
+  },
+  {
+   "id": "role-esp01",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "ESP-01 / ESP-01S röle modülü",
+   "cip": "ESP8266",
+   "dosya": "esp01_1m.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = GPIO0, Röle 2 = GPIO2",
+   "aciklama": "En yaygın tek/çift röleli ESP-01 modülleri.",
+   "baglanti": "USB-seri programlayıcı gerekir. Flaş modu için GPIO0'ı GND'ye bağlayıp gücü verin, yazdıktan sonra GPIO0'ı bırakın."
+  },
+  {
+   "id": "role-esp07",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "ESP-07 (GPIO4/5)",
+   "cip": "ESP8266",
+   "dosya": "esp07_gpio45.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = GPIO4, Röle 2 = GPIO5",
+   "aciklama": "ESP-07 / ESP-07S tabanlı kartlar.",
+   "baglanti": "Flaş modu: GPIO0 = GND, GPIO15 = GND, EN = 3V3."
+  },
+  {
+   "id": "role-nodemcu",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "NodeMCU / ESP-12E / ESP-12F",
+   "cip": "ESP8266",
+   "dosya": "nodemcu.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = D1 (GPIO5), Röle 2 = D2 (GPIO4)",
+   "aciklama": "NodeMCU v2/v3 ve ESP-12 tabanlı geliştirme kartları (4 MB).",
+   "baglanti": "Micro-USB ile doğrudan yüklenir (otomatik flaş moduna girer)."
+  },
+  {
+   "id": "role-d1mini",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "Wemos / LOLIN D1 mini",
+   "cip": "ESP8266",
+   "dosya": "d1_mini.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = D1 (GPIO5), Röle 2 = D2 (GPIO4)",
+   "aciklama": "D1 mini ve röle shield'leri (4 MB).",
+   "baglanti": "USB ile doğrudan yüklenir."
+  },
+  {
+   "id": "role-sonoff",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "Sonoff Basic (ESP8285)",
+   "cip": "ESP8266",
+   "dosya": "sonoff_basic.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle = GPIO12 (tek röle)",
+   "aciklama": "Sonoff Basic R1/R2/R3. Tek röle vardır; ikinci röle çıkışı kullanılmaz.",
+   "baglanti": "UYARI: yazarken şebeke gerilimini ASLA bağlamayın. Kart üzerindeki 4 pinli başlığa USB-seri (3.3 V) bağlayın, düğme basılıyken güç verip flaş moduna alın."
+  },
+  {
+   "id": "role-esp32",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "ESP32 DevKit (WROOM-32)",
+   "cip": "ESP32",
+   "dosya": "esp32_devkit.factory.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = GPIO26, Röle 2 = GPIO27",
+   "aciklama": "Klasik ESP32 DevKit v1 ve benzerleri.",
+   "baglanti": "USB ile yüklenir. Bağlanamazsa BOOT düğmesine basılı tutarak yeniden deneyin."
+  },
+  {
+   "id": "role-esp32c3",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "ESP32-C3 SuperMini",
+   "cip": "ESP32-C3",
+   "dosya": "c3_supermini.factory.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = GPIO3, Röle 2 = GPIO4",
+   "aciklama": "Küçük ve ucuz ESP32-C3 kartı (USB doğrudan).",
+   "baglanti": "Algılanmazsa BOOT'a basılı tutarak USB'yi takın."
+  },
+  {
+   "id": "role-esp32s3",
+   "grup": "Röle düğümü (lamba / priz)",
+   "ad": "ESP32-S3 DevKitC-1",
+   "cip": "ESP32-S3",
+   "dosya": "esp32_s3.factory.bin",
+   "surum": "2.9.0",
+   "pinler": "Röle 1 = GPIO4, Röle 2 = GPIO5",
+   "aciklama": "ESP32-S3 geliştirme kartları.",
+   "baglanti": "UART veya USB (native) girişinden yüklenebilir."
+  }
+ ]
+};

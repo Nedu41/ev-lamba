@@ -1,0 +1,16 @@
+{
+  "name": "ESP32 DevKit (WROOM-32)",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "../firmware/esp32_devkit.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

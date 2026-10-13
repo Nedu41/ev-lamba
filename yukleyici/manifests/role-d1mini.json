@@ -1,0 +1,16 @@
+{
+  "name": "Wemos / LOLIN D1 mini",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        {
+          "path": "../firmware/d1_mini.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

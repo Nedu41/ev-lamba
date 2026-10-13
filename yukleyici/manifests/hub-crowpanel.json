@@ -1,0 +1,16 @@
+{
+  "name": "Elecrow CrowPanel 7.0\" (ESP32-S3)",
+  "version": "7.2.1",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/crowpanel-7in.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

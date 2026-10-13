@@ -1,0 +1,16 @@
+{
+  "name": "ESP32-S3 DevKitC-1",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/esp32_s3.factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

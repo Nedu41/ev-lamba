@@ -1,0 +1,16 @@
+{
+  "name": "Sonoff Basic (ESP8285)",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        {
+          "path": "../firmware/sonoff_basic.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

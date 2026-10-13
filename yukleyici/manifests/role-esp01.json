@@ -1,0 +1,16 @@
+{
+  "name": "ESP-01 / ESP-01S röle modülü",
+  "version": "2.9.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        {
+          "path": "../firmware/esp01_1m.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
