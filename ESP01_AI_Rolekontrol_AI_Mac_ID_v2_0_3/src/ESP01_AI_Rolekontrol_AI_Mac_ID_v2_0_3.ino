@@ -97,12 +97,26 @@
 #include <HTTPClient.h>
 #include "esp32_compat.h"
 typedef WebServer WebServerT;
+#if defined(BOARD_ESP32DEV)
+// ESP32 DevKit (WROOM-32): 26/27 serbest, acilista guvenli (strapping/flas/UART pini degil)
+#define HOST_PREFIX "esp32-"
+#define SETUP_AP "ESP32_SETUP"
+#define RELAY_1_PIN 26
+#define RELAY_2_PIN 27
+#elif defined(BOARD_ESP32S3)
+// ESP32-S3 DevKitC-1: 4/5 serbest (0/3/45/46 strapping, 19/20 USB, 26-37 flas/PSRAM kullanilmaz)
+#define HOST_PREFIX "s3-"
+#define SETUP_AP "S3_SETUP"
+#define RELAY_1_PIN 4
+#define RELAY_2_PIN 5
+#else
 #define HOST_PREFIX "c3-"
 #define SETUP_AP "C3_SETUP"
 // SuperMini: GPIO2/8/9 acilis (strapping) pini, 8 kart LED'i, 18/19 USB,
 // 20/21 seri - hicbiri kullanilmaz. 3 ve 4 serbest.
 #define RELAY_1_PIN 3
 #define RELAY_2_PIN 4
+#endif
 #else
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -117,6 +131,14 @@ typedef ESP8266WebServer WebServerT;
 // - hicbiri kullanilmaz. 4 ve 5 serbest, acilista rolesiz (glitch yok).
 #define RELAY_1_PIN 4
 #define RELAY_2_PIN 5
+#elif defined(BOARD_NODEMCU)
+// NodeMCU / ESP-12E/F / Wemos D1 mini: D1 = GPIO5, D2 = GPIO4 (acilista guvenli, strapping degil)
+#define RELAY_1_PIN 5
+#define RELAY_2_PIN 4
+#elif defined(BOARD_SONOFF)
+// Sonoff Basic (ESP8285): role GPIO12. Ikinci role yok: GPIO14 (baslik pini, bos) yer tutucu
+#define RELAY_1_PIN 12
+#define RELAY_2_PIN 14
 #else
 #define RELAY_1_PIN 0
 #define RELAY_2_PIN 2
@@ -221,8 +243,13 @@ IPAddress hubIp;  // bilinmiyorsa (0.0.0.0) push yerel aga yayin olarak gider
 volatile bool pushPending = true;  // acilista hemen bildir
 unsigned long lastStatusPush = 0;
 
+#ifdef RELAY_ACTIVE_LOW   // cogu 2 kanalli optokuplorlu role modulu LOW ile calisir (-DRELAY_ACTIVE_LOW)
+#define RELAY_ON LOW
+#define RELAY_OFF HIGH
+#else
 #define RELAY_ON HIGH
 #define RELAY_OFF LOW
+#endif
 
 #define SCHED_R1_ADDR 0   
 #define SCHED_R2_ADDR 32  
