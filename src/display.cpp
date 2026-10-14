@@ -97,7 +97,7 @@ String decodeEntities(String s) {
   return s;
 }
 
-// "Kalburcu Mahallesi, İstanbul, ..." -> "Kalburcu"
+// "Atatürk Mahallesi, Kadıköy, İstanbul, ..." -> "Atatürk"
 String shortLocation(const String& full) {
   int comma = full.indexOf(',');
   String p = (comma < 0) ? full : full.substring(0, comma);
