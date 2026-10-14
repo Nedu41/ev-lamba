@@ -1,6 +1,6 @@
 {
-  "name": "ESP-01 — LC Technology 4 röle modülü: seri/baud TESTİ",
-  "version": "test v2",
+  "name": "ESP-01 — LC Technology 4 röle modülü: WiFi TANI aracı",
+  "version": "test v3",
   "new_install_prompt_erase": true,
   "builds": [
     {
