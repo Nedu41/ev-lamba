@@ -34,6 +34,17 @@
       "baglanti": "USB-seri programlayıcı gerekir. Flaş modu için GPIO0'ı GND'ye bağlayıp gücü verin, yazdıktan sonra GPIO0'ı bırakın."
     },
     {
+      "id": "test-lc4r",
+      "grup": "Test araçları",
+      "ad": "ESP-01 — LC Technology 4 röle modülü: seri/baud TESTİ",
+      "cip": "ESP8266",
+      "dosya": "lc4r_test.bin",
+      "surum": "test",
+      "pinler": "Röle çipine seri: TX = GPIO1, RX = GPIO3",
+      "aciklama": "Normal firmware DEĞİL. 4 röleli LC Technology modülünün seri protokolünü ve baud hızını ölçer. Röleler 115200'de 1 sn, sonra 9600'de 2 sn'lik turlarla 1→4 sırayla açılıp kapanır. Hangi turda röle tıklıyorsa baud odur.",
+      "baglanti": "ESP-01'i röle kartından çıkarıp USB-seri programlayıcıya takın, GPIO0'ı GND'ye bağlayıp gücü verin, yazın. Sonra GPIO0'ı bırakıp ESP-01'i röle kartına geri takın ve kartı kendi 5V'u ile besleyin."
+    },
+    {
       "id": "role-esp07",
       "grup": "Röle düğümü (lamba / priz)",
       "ad": "ESP-07 (GPIO4/5)",

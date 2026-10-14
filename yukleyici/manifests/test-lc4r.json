@@ -1,0 +1,16 @@
+{
+  "name": "ESP-01 — LC Technology 4 röle modülü: seri/baud TESTİ",
+  "version": "test",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        {
+          "path": "../firmware/lc4r_test.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
