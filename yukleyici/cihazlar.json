@@ -36,9 +36,9 @@
     {
       "id": "test-lc4r",
       "grup": "Test araçları",
-      "ad": "ESP-01 — LC Technology 4 röle modülü: WiFi TANI aracı",
+      "ad": "ESP-01 — LC Technology 4 röle modülü: WiFi TANI aracı (v3)",
       "cip": "ESP8266",
-      "dosya": "lc4r_test.bin",
+      "dosya": "lc4r_test_v3.bin",
       "surum": "test v3",
       "pinler": "Röle çipine seri: TX = GPIO1, RX = GPIO3",
       "aciklama": "Normal firmware DEĞİL. ESP-01 'LC4R_TEST' adlı açık bir WiFi ağı kurar. Telefonla bağlanıp tarayıcıda 192.168.4.1 açın: röle çipinin ESP-01'e seriden gönderdiği baytları canlı görürsünüz (hex + metin), baud'u (115200/9600) seçer, el sıkışma ve röle komutlarını elle gönderirsiniz. 'AT+RST' gelirse otomatik cevap verir.",
