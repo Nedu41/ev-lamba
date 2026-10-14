@@ -1,6 +1,6 @@
 {
   "name": "Elecrow CrowPanel 7.0\" (ESP32-S3)",
-  "version": "7.2.1",
+  "version": "7.3.0",
   "new_install_prompt_erase": true,
   "builds": [
     {

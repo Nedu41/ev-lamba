@@ -1,5 +1,5 @@
 {
-  "surum": "2026-10-13",
+  "surum": "2026-10-14",
   "cihazlar": [
     {
       "id": "hub-crowpanel",
@@ -7,8 +7,8 @@
       "ad": "Elecrow CrowPanel 7.0\" (ESP32-S3)",
       "cip": "ESP32-S3",
       "dosya": "crowpanel-7in.factory.bin",
-      "surum": "7.2.1",
-      "aciklama": "Dokunmatik ekranlı merkezi cihaz: lambalar, hava, uyarılar, yapay zeka efektleri. İlk açılışta ekrandan WiFi kurulumu yapılır. Telegram ve hava konumu Ayar sayfasından girilir.",
+      "surum": "7.3.0",
+      "aciklama": "Dokunmatik ekranlı merkezi cihaz: lambalar, hava, uyarılar, haberler. İlk açılışta ekrandan WiFi kurulumu yapılır. Telegram ve hava konumu Ayar sayfasından girilir.",
       "baglanti": "USB-C kabloyu kartın USB girişine takın (CH340 seri çipi; sürücü gerekirse yükleyin)."
     },
     {
