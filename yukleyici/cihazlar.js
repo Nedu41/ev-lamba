@@ -39,9 +39,9 @@ window.CIHAZLAR = {
    "ad": "ESP-01 — LC Technology 4 röle modülü: seri/baud TESTİ",
    "cip": "ESP8266",
    "dosya": "lc4r_test.bin",
-   "surum": "test",
+   "surum": "test v2",
    "pinler": "Röle çipine seri: TX = GPIO1, RX = GPIO3",
-   "aciklama": "Normal firmware DEĞİL. 4 röleli LC Technology modülünün seri protokolünü ve baud hızını ölçer. Röleler 115200'de 1 sn, sonra 9600'de 2 sn'lik turlarla 1→4 sırayla açılıp kapanır. Hangi turda röle tıklıyorsa baud odur.",
+   "aciklama": "Normal firmware DEĞİL. 4 röleli LC Technology modülünün seri protokolünü ölçer. Tur A: 115200 baud + Nuvoton el sıkışması (AT+RST cevabı), röleler 1→4 birer sn açılıp kapanır. Tur B: 9600 baud, ikişer sn. Her komut iki kez gönderilir. Hangi turda röle tıklıyorsa onu not edin.",
    "baglanti": "ESP-01'i röle kartından çıkarıp USB-seri programlayıcıya takın, GPIO0'ı GND'ye bağlayıp gücü verin, yazın. Sonra GPIO0'ı bırakıp ESP-01'i röle kartına geri takın ve kartı kendi 5V'u ile besleyin."
   },
   {
