@@ -50,7 +50,7 @@ tek bir web arayüzünden yöneten merkezi kontrol ünitesi ("Merkezi HUB"). Sü
 ### Kablosuz güncelleme (OTA)
 
 - HUB: `pio run -t upload --upload-port merkezihub.local`
-- ESP01 (proje: `D:\Arduino\ESP\ESP01_AI_Rolekontrol_AI_Mac_ID_v2_0_3`, PlatformIO, `src/`):
+- ESP01 (proje: `ESP01_AI_Rolekontrol_AI_Mac_ID_v2_0_3/` (bu depoda), PlatformIO, `src/`):
   `pio run -t upload --upload-port esp01-XXXXXX.local` (XXXXXX = MAC'in son 6 hanesi)
 - USB ile flaşlamadan sonraki **ilk** OTA "Invalid bootstrapping state" hatası verirse:
   cihazın gücünü bir kez kesip ver (USB flaş sonrası GPIO0 strap durumu).
@@ -59,4 +59,4 @@ tek bir web arayüzünden yöneten merkezi kontrol ünitesi ("Merkezi HUB"). Sü
 
 - Geri dönüş: `pre-async-migration` git etiketi, WebSocket/modül geçişinden önceki tek dosyalı sürüm.
 - `docs/legacy/` altındaki `index*.html` dosyaları kullanılmıyor, referans için duruyor.
-- Eski sürüm klasörleri (`D:\Arduino\ESP\esp32Wroom_Sunucu_v*`) arşiv olarak orada.
+- Eski sürüm klasörleri (`esp32Wroom_Sunucu_v*`) bu depoda değil, arşivde.
