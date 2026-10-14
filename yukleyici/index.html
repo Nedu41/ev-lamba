@@ -68,7 +68,7 @@
   </footer>
 </main>
 
-<script src="cihazlar.js"></script>
+<script>document.write('<script src="cihazlar.js?t=' + Date.now() + '"><\/script>');</script>
 <script type="module" src="vendor/esp-web-tools/install-button.js"></script>
 <script>
   if (!('serial' in navigator)) document.getElementById('destek').hidden = false;
@@ -146,7 +146,7 @@
     u.innerHTML = 'Sayfa dosya olarak açıldı: liste görünür ama <b>Yükle çalışmaz</b>. <b>baslat.bat</b> dosyasına çift tıklayın (yerel sunucu açar) ya da siteyi GitHub Pages adresinden açın.';
   }
   if (window.CIHAZLAR) basla(window.CIHAZLAR);
-  else fetch('cihazlar.json').then(r => r.json()).then(basla);
+  else fetch('cihazlar.json?t=' + Date.now()).then(r => r.json()).then(basla);
 </script>
 </body>
 </html>
